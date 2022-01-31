@@ -200,8 +200,8 @@ object TetraDemo extends IOApp.Simple {
       def get(id: TypedIdentifier): F[Option[BlockV2]] =
         (OptionT(headerStore.get(id)), OptionT(bodyStore.get(id))).tupled.map((BlockV2.apply _).tupled).value
 
-      def put(t: BlockV2): F[Unit] =
-        (headerStore.put(t.headerV2), bodyStore.put(t.blockBodyV2)).tupled.void
+      def put(id: TypedIdentifier, t: BlockV2): F[Unit] =
+        (headerStore.put(id, t.headerV2), bodyStore.put(id, t.blockBodyV2)).tupled.void
 
       def remove(id: TypedIdentifier): F[Unit] =
         (headerStore.remove(id), bodyStore.remove(id)).tupled.void
@@ -215,7 +215,7 @@ object TetraDemo extends IOApp.Simple {
       blockHeaderStore <- RefStore.Eval.make[F, BlockHeaderV2]()
       blockBodyStore   <- RefStore.Eval.make[F, BlockBodyV2]()
       blockStore = createBlockStore(blockHeaderStore, blockBodyStore)
-      _             <- blockStore.put(genesis)
+      _             <- blockStore.put(genesis.headerV2.id, genesis)
       slotDataCache <- SlotDataCache.Eval.make(blockHeaderStore)
       etaCalculation <- EtaCalculation.Eval.make(
         slotDataCache,

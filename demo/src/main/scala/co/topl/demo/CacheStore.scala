@@ -6,7 +6,6 @@ import cats.implicits._
 import co.topl.algebras.Store
 import co.topl.models.TypedIdentifier
 import co.topl.typeclasses.Identifiable
-import co.topl.typeclasses.implicits._
 import scalacache.caffeine.CaffeineCache
 
 import scala.concurrent.duration.FiniteDuration
@@ -22,8 +21,8 @@ object CacheStore {
           def get(id: TypedIdentifier): F[Option[T]] =
             scalacache.get(id)
 
-          def put(t: T): F[Unit] =
-            scalacache.put(t.id)(t, ttl = Some(ttl))
+          def put(id: TypedIdentifier, t: T): F[Unit] =
+            scalacache.put(id)(t, ttl = Some(ttl))
 
           def remove(id: TypedIdentifier): F[Unit] =
             scalacache.remove(id)
@@ -45,8 +44,8 @@ object RefStore {
             def get(id: TypedIdentifier): F[Option[T]] =
               ref.get.map(_.get(id))
 
-            def put(t: T): F[Unit] =
-              ref.update(_.updated(t.id, t))
+            def put(id: TypedIdentifier, t: T): F[Unit] =
+              ref.update(_.updated(id, t))
 
             def remove(id: TypedIdentifier): F[Unit] =
               ref.update(_.removed(id))
