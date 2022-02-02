@@ -8,7 +8,6 @@ import ClockAlgebra.implicits._
 import cats.Monad
 import co.topl.codecs.bytes.ByteCodec
 import co.topl.codecs.bytes.implicits._
-import co.topl.models.Box.Values
 import co.topl.models.utility.Ratio
 import co.topl.models._
 import org.iq80.leveldb.Options
@@ -57,7 +56,7 @@ object ConsensusState {
         .map(db =>
           new ConsensusState[F] {
 
-            def registrationOf(address: TaktikosAddress): F[Option[Values.TaktikosRegistration]] =
+            def registrationOf(address: TaktikosAddress): F[Option[Box.Values.TaktikosRegistration]] =
               OptionT(
                 Sync[F].blocking(
                   Option(db.get((Bytes("r".getBytes(StandardCharsets.UTF_8)) ++ keyifyAddress(address)).toArray))

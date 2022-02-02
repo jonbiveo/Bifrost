@@ -28,7 +28,7 @@ object Transaction {
   sealed abstract class ConsensusOutput
 
   object ConsensusOutputs {
-    case class Registration(commitment: Any) extends ConsensusOutput
+    case class Registration(commitment: Proofs.Knowledge.KesProduct) extends ConsensusOutput
     case class Deregistration() extends ConsensusOutput
   }
 
