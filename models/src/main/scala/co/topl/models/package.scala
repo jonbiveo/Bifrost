@@ -22,6 +22,12 @@ package object models {
   type TypePrefix = Byte
   type TypedIdentifier = TypedBytes
   type Int128 = Sized.Max[BigInt, Lengths.`128`.type]
+
+  object Int128 {
+    import co.topl.models.utility.HasLength.instances._
+    def apply(value: Int): Int128 = Sized.maxUnsafe(BigInt(value))
+    def apply(value: Long): Int128 = Sized.maxUnsafe(BigInt(value))
+  }
   type Timestamp = Long
   type Slot = Long
   type Attestation = ListMap[Proposition, Proof]

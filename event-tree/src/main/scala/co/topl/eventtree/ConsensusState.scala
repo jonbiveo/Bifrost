@@ -10,7 +10,7 @@ import co.topl.codecs.bytes.implicits._
 import co.topl.models._
 import co.topl.models.utility.HasLength.instances.bigIntLength
 import co.topl.models.utility.{Ratio, Sized}
-import co.topl.typeclasses.implicits.showTaktikosAddress
+import co.topl.typeclasses.implicits._
 import org.iq80.leveldb.impl.Iq80DBFactory
 import org.iq80.leveldb.{DB, Options}
 
@@ -62,7 +62,12 @@ object ConsensusState {
       def openDb(name: String): F[DB] =
         Sync[F].blocking(dbFactory.open(Paths.get(path.toString, name).toFile, new Options))
       (
-        openDb("meta"),
+        openDb("meta").flatTap(db =>
+          Sync[F].blocking {
+            if (Option(db.get(CurrentEpochKey)).isEmpty) db.put(CurrentEpochKey, 0L.bytes.toArray)
+            if (Option(db.get(TotalStakeKey)).isEmpty) db.put(TotalStakeKey, Int128(10000L).bytes.toArray)
+          }
+        ),
         openDb("activeRegistrations"),
         openDb("activeStake"),
         openDb("alphaRegistrations"),
@@ -177,7 +182,7 @@ object ConsensusState {
           _ <- Sync[F].blocking {
             val b = pendingStakeChangesDb.createWriteBatch()
             delta.stakeChanges.foreach { case (addr, old, newStake) =>
-              b.put(addr.bytes.toArray, (old, newStake).bytes.toArray)
+              b.put((addr, old, newStake).bytes.toArray, Array.emptyByteArray)
             }
             pendingStakeChangesDb.write(b)
             b.close()
@@ -193,12 +198,12 @@ object ConsensusState {
             val batch1 = activeRegistrationsDb.createWriteBatch()
             (delta.appliedExpirations.map(_._1) ++ delta.appliedDeregistrations.map(_._1))
               .foreach { a =>
-                batch1.delete(eBytes ++ a.bytes)
-                batch1.delete(rBytes ++ a.bytes)
+                batch1.delete(eBytes ++ a.bytes.toArray)
+                batch1.delete(rBytes ++ a.bytes.toArray)
               }
             delta.appliedRegistrations.foreach { case (address, box, epoch) =>
-              batch1.put(eBytes ++ address.bytes, epoch.bytes.toArray)
-              batch1.put(rBytes ++ address.bytes, box.bytes.toArray)
+              batch1.put(eBytes ++ address.bytes.toArray, epoch.bytes.toArray)
+              batch1.put(rBytes ++ address.bytes.toArray, box.bytes.toArray)
             }
             activeRegistrationsDb.write(batch1)
             batch1.close()
@@ -237,7 +242,7 @@ object ConsensusState {
           _ <- Sync[F].blocking {
             val b = pendingStakeChangesDb.createWriteBatch()
             delta.stakeChanges.foreach { case (addr, old, newStake) =>
-              b.put(addr.bytes.toArray, (old, newStake).bytes.toArray)
+              b.put((addr, old, newStake).bytes.toArray, Array.emptyByteArray)
             }
             pendingStakeChangesDb.write(b)
             b.close()
@@ -252,12 +257,12 @@ object ConsensusState {
           _ <- Sync[F].blocking {
             val batch = activeRegistrationsDb.createWriteBatch()
             (delta.appliedExpirations ++ delta.appliedDeregistrations).foreach { case (a, box, epoch) =>
-              batch.put(eBytes ++ a.bytes, epoch.bytes.toArray)
-              batch.put(rBytes ++ a.bytes, box.bytes.toArray)
+              batch.put(eBytes ++ a.bytes.toArray, epoch.bytes.toArray)
+              batch.put(rBytes ++ a.bytes.toArray, box.bytes.toArray)
             }
             delta.appliedRegistrations.foreach { case (address, _, _) =>
-              batch.delete(eBytes ++ address.bytes)
-              batch.delete(rBytes ++ address.bytes)
+              batch.delete(eBytes ++ address.bytes.toArray)
+              batch.delete(rBytes ++ address.bytes.toArray)
             }
             activeRegistrationsDb.write(batch)
             batch.close()
@@ -284,7 +289,7 @@ object ConsensusState {
               n0PendingRegistrationsDb.put(a.bytes.toArray, box.bytes.toArray)
             }
             delta.appliedStakeChanges.foreach { case (a, old, newStake) =>
-              n0PendingStakeChangesDb.put(a.bytes.toArray, (old, newStake).bytes.toArray)
+              n0PendingStakeChangesDb.put((a, old, newStake).bytes.toArray, Array.emptyByteArray)
             }
           }
         } yield ()
@@ -319,6 +324,7 @@ object ConsensusState {
             }
             .map(stakeChanges =>
               NormalConsensusDelta(
+                block.headerV2.id,
                 block.blockBodyV2.transactions
                   .flatMap(
                     _.consensusOutputs.collect { case Transaction.ConsensusOutputs.Registration(address, commitment) =>
@@ -339,16 +345,18 @@ object ConsensusState {
         )
 
       private def expiringRegistrations(newEpoch: Epoch): F[List[TaktikosAddress]] =
-        Sync[F].blocking {
-          val it = activeRegistrationsDb.iterator()
-          it.seek("e".getBytes(StandardCharsets.UTF_8))
-          val res = it.asScala
-            .takeWhile(_.getKey.startsWith(eBytes))
-            .filter(kv => Bytes(kv.getValue).decoded[Long] < (newEpoch - 18L)) // TODO: Don't hardcode
-            .toList
-          it.close()
-          res
-        }
+        Sync[F]
+          .blocking {
+            val it = activeRegistrationsDb.iterator()
+            it.seek(eBytes)
+            val res = it.asScala
+              .takeWhile(_.getKey.startsWith(eBytes))
+              .filter(kv => Bytes(kv.getValue).decoded[Long] < (newEpoch - 18L)) // TODO: Don't hardcode
+              .toList
+            it.close()
+            res
+          }
+          .map(_.map(e => Bytes(e.getKey.drop(eBytes.length)).decoded[TaktikosAddress]))
 
       private def calculateEpochCrossingDelta(block: BlockV2, newEpoch: Epoch): F[EpochCrossingDelta] =
         Sync[F].defer(
@@ -420,6 +428,7 @@ object ConsensusState {
                 )
               )
           } yield EpochCrossingDelta(
+            block.headerV2.id,
             normalDelta,
             newEpoch,
             registrationsToExpire,
@@ -488,7 +497,7 @@ object ConsensusState {
       }
 
       private def getOrNoSuchElement[T](f: F[Option[T]], key: => String): F[T] =
-        OptionT(f).getOrElse(MonadThrow[F].raiseError(new NoSuchElementException(key)))
+        OptionT(f).getOrElseF(MonadThrow[F].raiseError[T](new NoSuchElementException(key)))
     }
 
   }

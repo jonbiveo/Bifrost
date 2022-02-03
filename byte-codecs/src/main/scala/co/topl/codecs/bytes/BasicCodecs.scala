@@ -1,14 +1,19 @@
 package co.topl.codecs.bytes
 
+import cats.data.{Chain, NonEmptyChain}
 import co.topl.codecs.bytes.ByteCodec.ops._
 import co.topl.models
 import co.topl.models.BlockHeaderV2.Unsigned
+import co.topl.models.Box.Values
 import co.topl.models.Proofs.Knowledge
+import co.topl.models.Transaction.{CoinOutputs, ConsensusOutput}
 import co.topl.models._
 import co.topl.models.utility.HasLength.instances._
 import co.topl.models.utility.Lengths._
 import co.topl.models.utility.StringDataTypes.Latin1Data
 import co.topl.models.utility.{KesBinaryTree, Length, Lengths, Ratio, Sized}
+
+import scala.collection.immutable.ListMap
 
 trait BasicCodecs {
 
@@ -70,6 +75,25 @@ trait BasicCodecs {
         (ByteCodec[T1].decode(reader), ByteCodec[T2].decode(reader), ByteCodec[T3].decode(reader))
     }
 
+  implicit def tuple4Codec[T1: ByteCodec, T2: ByteCodec, T3: ByteCodec, T4: ByteCodec]: ByteCodec[(T1, T2, T3, T4)] =
+    new ByteCodec[(T1, T2, T3, T4)] {
+
+      def encode(t: (T1, T2, T3, T4), writer: Writer): Unit = {
+        t._1.writeBytesTo(writer)
+        t._2.writeBytesTo(writer)
+        t._3.writeBytesTo(writer)
+        t._4.writeBytesTo(writer)
+      }
+
+      def decode(reader: Reader): (T1, T2, T3, T4) =
+        (
+          ByteCodec[T1].decode(reader),
+          ByteCodec[T2].decode(reader),
+          ByteCodec[T3].decode(reader),
+          ByteCodec[T4].decode(reader)
+        )
+    }
+
   implicit def optionCodec[T: ByteCodec]: ByteCodec[Option[T]] = new ByteCodec[Option[T]] {
 
     def encode(t: Option[T], writer: Writer): Unit =
@@ -94,7 +118,12 @@ trait BasicCodecs {
         t.signature.writeBytesTo(writer)
       }
 
-      override def decode(reader: Reader): TaktikosAddress = ???
+      override def decode(reader: Reader): TaktikosAddress =
+        TaktikosAddress(
+          ByteCodec[Evidence].decode(reader),
+          ByteCodec[VerificationKeys.Ed25519].decode(reader),
+          ByteCodec[Proofs.Knowledge.Ed25519].decode(reader)
+        )
     }
 
   implicit val int128Codec: ByteCodec[Int128] =
@@ -107,19 +136,19 @@ trait BasicCodecs {
       }
 
       def decode(reader: Reader): Int128 =
-        Sized.maxUnsafe[BigInt, Lengths.`128`.type](BigInt(reader.getBytes(reader.getInt)))
+        Sized.maxUnsafe[BigInt, Lengths.`128`.type](BigInt(reader.getBytes(reader.getInt())))
     }
 
-  implicit val sizedMaxLatin1DataCodec: ByteCodec[Sized.Max[Latin1Data, Lengths.`32`.type]] =
-    new ByteCodec[Sized.Max[Latin1Data, Lengths.`32`.type]] {
+  implicit def sizedMaxLatin1DataCodec[L <: Length](implicit length: L): ByteCodec[Sized.Max[Latin1Data, L]] =
+    new ByteCodec[Sized.Max[Latin1Data, L]] {
 
-      def encode(t: Sized.Max[Latin1Data, Lengths.`32`.type], writer: Writer): Unit = {
+      def encode(t: Sized.Max[Latin1Data, L], writer: Writer): Unit = {
         writer.putInt(t.data.value.length)
         writer.putBytes(t.data.value)
       }
 
-      def decode(reader: Reader): Sized.Max[Latin1Data, Lengths.`32`.type] =
-        Sized.maxUnsafe(
+      def decode(reader: Reader): Sized.Max[Latin1Data, L] =
+        Sized.maxUnsafe[Latin1Data, L](
           Latin1Data.fromData(reader.getBytes(reader.getInt()))
         )
     }
@@ -128,12 +157,26 @@ trait BasicCodecs {
     new ByteCodec[TypedBytes] {
 
       def encode(t: TypedBytes, writer: Writer): Unit = {
-        writer.putInt(t.allBytes.length.toInt)
-        writer.putBytes(t.allBytes.toArray)
+        writer.put(t.typePrefix)
+        t.dataBytes.writeBytesTo(writer)
       }
 
       def decode(reader: Reader): TypedBytes =
-        TypedBytes(Bytes(reader.getBytes(reader.getInt())))
+        TypedBytes(reader.getByte(), ByteCodec[Bytes].decode(reader))
+    }
+
+  implicit val propositionCodec: ByteCodec[Proposition] =
+    new ByteCodec[Proposition] {
+      def encode(t: Proposition, writer: Writer): Unit = ???
+
+      def decode(reader: Reader): Proposition = ???
+    }
+
+  implicit val proofCodec: ByteCodec[Proof] =
+    new ByteCodec[Proof] {
+      def encode(t: Proof, writer: Writer): Unit = ???
+
+      def decode(reader: Reader): Proof = ???
     }
 
   implicit val blockHeaderV2Codec: ByteCodec[BlockHeaderV2] = new ByteCodec[BlockHeaderV2] {
@@ -144,6 +187,7 @@ trait BasicCodecs {
       t.txRoot.writeBytesTo(writer)
       t.bloomFilter.writeBytesTo(writer)
       writer.putLong(t.timestamp)
+      writer.putLong(t.height)
       writer.putLong(t.slot)
       t.eligibilityCertificate.writeBytesTo(writer)
       t.operationalCertificate.writeBytesTo(writer)
@@ -153,7 +197,7 @@ trait BasicCodecs {
 
     override def decode(reader: Reader): BlockHeaderV2 =
       BlockHeaderV2(
-        ByteCodec[TypedBytes].decode(reader),
+        ByteCodec[TypedIdentifier].decode(reader),
         reader.getLong(),
         ByteCodec[TxRoot].decode(reader),
         ByteCodec[BloomFilter].decode(reader),
@@ -174,11 +218,14 @@ trait BasicCodecs {
       t.transactions.writeBytesTo(writer)
     }
 
-    override def decode(reader: Reader): BlockBodyV2 =
+    override def decode(reader: Reader): BlockBodyV2 = {
+      val headerId = ByteCodec[TypedIdentifier].decode(reader)
+      val transactions = ByteCodec[Seq[Transaction]].decode(reader)
       BlockBodyV2(
-        ByteCodec[TypedBytes].decode(reader),
-        ByteCodec[Seq[Transaction]].decode(reader)
+        headerId,
+        transactions
       )
+    }
   }
 
   implicit val blockV2Codec: ByteCodec[BlockV2] =
@@ -189,11 +236,14 @@ trait BasicCodecs {
         t.blockBodyV2.writeBytesTo(writer)
       }
 
-      def decode(reader: Reader): BlockV2 =
+      def decode(reader: Reader): BlockV2 = {
+        val header = ByteCodec[BlockHeaderV2].decode(reader)
+        val body = ByteCodec[BlockBodyV2].decode(reader)
         BlockV2(
-          ByteCodec[BlockHeaderV2].decode(reader),
-          ByteCodec[BlockBodyV2].decode(reader)
+          header,
+          body
         )
+      }
     }
 
   implicit val blockV1Codec: ByteCodec[BlockV1] = new ByteCodec[BlockV1] {
@@ -202,10 +252,181 @@ trait BasicCodecs {
     override def decode(reader: Reader): BlockV1 = ???
   }
 
-  implicit val transactionCodec: ByteCodec[Transaction] = new ByteCodec[Transaction] {
-    override def encode(t: Transaction, writer: Writer): Unit = ???
+  implicit val bytesCodec: ByteCodec[Bytes] = new ByteCodec[Bytes] {
 
-    override def decode(reader: Reader): Transaction = ???
+    def encode(t: Bytes, writer: Writer): Unit = {
+      writer.putInt(t.length.toInt)
+      writer.putBytes(t.toArray)
+    }
+
+    def decode(reader: Reader): Bytes =
+      Bytes(reader.getBytes(reader.getInt()))
+  }
+
+  implicit val typedEvidenceCodec: ByteCodec[TypedEvidence] = new ByteCodec[TypedEvidence] {
+
+    def encode(t: TypedEvidence, writer: Writer): Unit = {
+      writer.put(t.typePrefix)
+      t.evidence.writeBytesTo(writer)
+    }
+
+    def decode(reader: Reader): TypedEvidence =
+      TypedEvidence(
+        reader.getByte(),
+        ByteCodec[Evidence].decode(reader)
+      )
+  }
+
+  implicit val dionAddressCodec: ByteCodec[DionAddress] = new ByteCodec[DionAddress] {
+
+    def encode(t: DionAddress, writer: Writer): Unit = {
+      writer.put(t.networkPrefix.value)
+      t.typedEvidence.writeBytesTo(writer)
+    }
+
+    def decode(reader: Reader): DionAddress =
+      DionAddress(NetworkPrefix(reader.getByte()), ByteCodec[TypedEvidence].decode(reader))
+  }
+
+  implicit val assetCodeCodec: ByteCodec[Box.Values.Asset.Code] =
+    new ByteCodec[Box.Values.Asset.Code] {
+
+      def encode(t: Box.Values.Asset.Code, writer: Writer) = {
+        writer.put(t.version)
+        t.issuer.writeBytesTo(writer)
+        t.shortName.writeBytesTo(writer)
+      }
+
+      def decode(reader: Reader): Box.Values.Asset.Code =
+        Box.Values.Asset.Code(
+          reader.getByte(),
+          ByteCodec[DionAddress].decode(reader),
+          ByteCodec[Sized.Max[Latin1Data, Lengths.`8`.type]].decode(reader)
+        )
+    }
+
+  implicit val assetBoxValueCodec: ByteCodec[Box.Values.Asset] =
+    new ByteCodec[Box.Values.Asset] {
+
+      def encode(t: Box.Values.Asset, writer: Writer): Unit = {
+        t.quantity.writeBytesTo(writer)
+        t.assetCode.writeBytesTo(writer)
+        t.securityRoot.writeBytesTo(writer)
+        t.metadata.writeBytesTo(writer)
+      }
+
+      def decode(reader: Reader): Box.Values.Asset =
+        Box.Values.Asset(
+          ByteCodec[Int128].decode(reader),
+          ByteCodec[Box.Values.Asset.Code].decode(reader),
+          ByteCodec[Bytes].decode(reader),
+          ByteCodec[Option[Sized.Max[Latin1Data, Lengths.`127`.type]]].decode(reader)
+        )
+    }
+
+  implicit val polyCoinOutputCodec: ByteCodec[Transaction.CoinOutputs.Poly] =
+    new ByteCodec[Transaction.CoinOutputs.Poly] {
+
+      def encode(t: Transaction.CoinOutputs.Poly, writer: Writer): Unit = {
+        t.dionAddress.writeBytesTo(writer)
+        t.value.writeBytesTo(writer)
+      }
+
+      def decode(reader: Reader): Transaction.CoinOutputs.Poly =
+        Transaction.CoinOutputs.Poly(ByteCodec[DionAddress].decode(reader), ByteCodec[Int128].decode(reader))
+    }
+
+  implicit val transactionCoinOutputByteCodec: ByteCodec[Transaction.CoinOutput] =
+    new ByteCodec[Transaction.CoinOutput] {
+
+      def encode(t: Transaction.CoinOutput, writer: Writer): Unit = t match {
+        case Transaction.CoinOutputs.Poly(address, value) =>
+          writer.put(0: Byte)
+          address.writeBytesTo(writer)
+          value.writeBytesTo(writer)
+        case Transaction.CoinOutputs.Arbit(address, taktikosAddress, value) =>
+          writer.put(1: Byte)
+          address.writeBytesTo(writer)
+          taktikosAddress.writeBytesTo(writer)
+          value.writeBytesTo(writer)
+        case Transaction.CoinOutputs.Asset(address, value) =>
+          writer.put(2: Byte)
+          address.writeBytesTo(writer)
+          value.writeBytesTo(writer)
+      }
+
+      def decode(reader: Reader): Transaction.CoinOutput =
+        reader.getByte() match {
+          case 0 =>
+            Transaction.CoinOutputs.Poly(ByteCodec[DionAddress].decode(reader), ByteCodec[Int128].decode(reader))
+          case 1 =>
+            Transaction.CoinOutputs.Arbit(
+              ByteCodec[DionAddress].decode(reader),
+              ByteCodec[TaktikosAddress].decode(reader),
+              ByteCodec[Int128].decode(reader)
+            )
+          case 2 => ???
+        }
+    }
+
+  implicit val consensusOutputCodec: ByteCodec[Transaction.ConsensusOutput] =
+    new ByteCodec[Transaction.ConsensusOutput] {
+
+      def encode(t: Transaction.ConsensusOutput, writer: Writer): Unit =
+        t match {
+          case r: Transaction.ConsensusOutputs.Registration =>
+            writer.put(0: Byte)
+            r.address.writeBytesTo(writer)
+            r.commitment.writeBytesTo(writer)
+          case d: Transaction.ConsensusOutputs.Deregistration =>
+            writer.put(1: Byte)
+            d.address.writeBytesTo(writer)
+        }
+
+      def decode(reader: Reader): Transaction.ConsensusOutput =
+        reader.getByte() match {
+          case 0 =>
+            Transaction.ConsensusOutputs.Registration(
+              ByteCodec[TaktikosAddress].decode(reader),
+              ByteCodec[Proofs.Knowledge.KesProduct].decode(reader)
+            )
+          case 1 =>
+            Transaction.ConsensusOutputs.Deregistration(
+              ByteCodec[TaktikosAddress].decode(reader)
+            )
+        }
+    }
+
+  implicit val transactionCodec: ByteCodec[Transaction] = new ByteCodec[Transaction] {
+
+    override def encode(t: Transaction, writer: Writer): Unit = {
+      t.inputs.toSeq
+        .map { case ((address, nonce), (proposition, proof)) =>
+          (address, nonce, proposition, proof)
+        }
+        .writeBytesTo(writer)
+      t.feeOutput.writeBytesTo(writer)
+      (t.coinOutputs.toChain.toList: Seq[Transaction.CoinOutput]).writeBytesTo(writer)
+      (t.consensusOutputs.toList: Seq[Transaction.ConsensusOutput]).writeBytesTo(writer)
+      t.fee.writeBytesTo(writer)
+      t.timestamp.writeBytesTo(writer)
+      t.data.writeBytesTo(writer)
+      writer.putBoolean(t.minting)
+    }
+
+    override def decode(reader: Reader): Transaction =
+      Transaction(
+        ListMap.from(ByteCodec[Seq[(DionAddress, BoxNonce, Proposition, Proof)]].decode(reader).map {
+          case (a, n, prop, proof) => (a, n) -> (prop, proof)
+        }),
+        ByteCodec[Option[Transaction.CoinOutputs.Poly]].decode(reader),
+        NonEmptyChain.fromChainUnsafe(Chain.fromSeq(ByteCodec[Seq[Transaction.CoinOutput]].decode(reader))),
+        Chain.fromSeq(ByteCodec[Seq[Transaction.ConsensusOutput]].decode(reader)),
+        ByteCodec[Int128].decode(reader),
+        reader.getLong(),
+        ByteCodec[Option[TransactionData]].decode(reader),
+        reader.getBoolean()
+      )
   }
 
   implicit val boxCodec: ByteCodec[Box[_]] = new ByteCodec[Box[_]] {
@@ -404,7 +625,8 @@ trait BasicCodecs {
     override def encode(t: EligibilityCertificate, writer: Writer): Unit = {
       t.vrfSig.writeBytesTo(writer)
       t.vkVRF.writeBytesTo(writer)
-      writer.putBytes(t.thresholdEvidence.data.toArray)
+      t.thresholdEvidence.writeBytesTo(writer)
+      t.eta.writeBytesTo(writer)
     }
 
     override def decode(reader: Reader): EligibilityCertificate =
