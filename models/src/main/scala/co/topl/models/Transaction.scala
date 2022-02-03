@@ -21,15 +21,15 @@ object Transaction {
 
   object CoinOutputs {
     case class Poly(dionAddress: DionAddress, value: Int128) extends CoinOutput
-    case class Arbit(dionAddress: DionAddress, value: Int128) extends CoinOutput
+    case class Arbit(dionAddress: DionAddress, taktikosAddress: TaktikosAddress, value: Int128) extends CoinOutput
     case class Asset(dionAddress: DionAddress, value: Box.Values.Asset) extends CoinOutput
   }
 
   sealed abstract class ConsensusOutput
 
   object ConsensusOutputs {
-    case class Registration(commitment: Proofs.Knowledge.KesProduct) extends ConsensusOutput
-    case class Deregistration() extends ConsensusOutput
+    case class Registration(address: TaktikosAddress, commitment: Proofs.Knowledge.KesProduct) extends ConsensusOutput
+    case class Deregistration(address: TaktikosAddress) extends ConsensusOutput
   }
 
   case class Unproven(

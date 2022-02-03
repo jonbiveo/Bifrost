@@ -12,6 +12,7 @@ import cats.implicits._
 import cats.~>
 import co.topl.algebras._
 import co.topl.codecs.bytes.implicits._
+import co.topl.commoninterpreters.AkkaSchedulerClock
 import co.topl.consensus.LeaderElectionValidation.VrfConfig
 import co.topl.consensus._
 import co.topl.consensus.algebras.{EtaCalculationAlgebra, LeaderElectionValidationAlgebra}

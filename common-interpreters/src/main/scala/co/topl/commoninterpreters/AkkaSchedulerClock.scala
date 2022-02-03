@@ -1,10 +1,10 @@
-package co.topl.demo
+package co.topl.commoninterpreters
 
 import akka.actor.typed.ActorSystem
 import cats.Monad
+import cats.implicits._
 import cats.effect.Sync
 import cats.effect.kernel.Async
-import cats.implicits._
 import co.topl.algebras.ClockAlgebra
 import co.topl.models.{Epoch, Slot, Timestamp}
 
