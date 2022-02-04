@@ -7,53 +7,58 @@ import cats.effect.std.Semaphore
 import cats.implicits._
 import co.topl.algebras.{Store, StoreReader}
 import co.topl.models._
-import co.topl.typeclasses._
 import co.topl.typeclasses.implicits._
 
-trait EventTree[F[_], Event, State] {
+/**
+ * Derives/computes/retrieves the State at some eventId
+ */
+trait EventSourcedState[F[_], Event, State] {
   def stateAt(eventId: TypedIdentifier): F[State]
 }
 
-object EventTree {
+object EventSourcedState {
 
-  object Eval {
+  /**
+   * An EventSourcedState that is assembled from a tree of events instead of a single linear chain
+   */
+  object OfTree {
 
-    def make[F[_]: Async, Event, State, StateDelta: Identifiable](
-      initialState:    F[State],
-      initialEventId:  F[TypedIdentifier],
-      eventAsDelta:    (Event, State) => F[StateDelta],
-      applyDelta:      (State, StateDelta) => F[State],
-      unapplyDelta:    (State, StateDelta) => F[State],
-      eventStore:      StoreReader[F, Event],
-      deltaStore:      Store[F, StateDelta],
-      parentChildTree: ParentChildTree[F, TypedIdentifier]
-    ): F[EventTree[F, Event, State]] = for {
+    def make[F[_]: Async, Event, State, UnapplyEvent](
+      initialState:        F[State],
+      initialEventId:      F[TypedIdentifier],
+      eventAsUnapplyEvent: (Event, State) => F[UnapplyEvent],
+      applyEvent:          (State, Event) => F[State],
+      unapplyEvent:        (State, UnapplyEvent) => F[State],
+      eventStore:          StoreReader[F, Event],
+      unapplyEventStore:   Store[F, UnapplyEvent],
+      parentChildTree:     ParentChildTree[F, TypedIdentifier]
+    ): F[EventSourcedState[F, Event, State]] = for {
       permit            <- Semaphore[F](1).map(_.permit)
       currentStateRef   <- initialState.flatMap(Ref.of[F, State])
       currentEventIdRef <- initialEventId.flatMap(Ref.of[F, TypedIdentifier])
-    } yield new Impl[F, Event, State, StateDelta](
-      eventAsDelta,
-      applyDelta,
-      unapplyDelta,
+    } yield new Impl[F, Event, State, UnapplyEvent](
+      eventAsUnapplyEvent,
+      applyEvent,
+      unapplyEvent,
       eventStore,
-      deltaStore,
+      unapplyEventStore,
       parentChildTree,
       permit,
       currentStateRef,
       currentEventIdRef
     )
 
-    private class Impl[F[_]: Async, Event, State, StateDelta: Identifiable](
-      eventAsDelta:      (Event, State) => F[StateDelta],
-      applyDelta:        (State, StateDelta) => F[State],
-      unapplyDelta:      (State, StateDelta) => F[State],
-      eventStore:        StoreReader[F, Event],
-      deltaStore:        Store[F, StateDelta],
-      parentChildTree:   ParentChildTree[F, TypedIdentifier],
-      permit:            Resource[F, Unit],
-      currentStateRef:   Ref[F, State],
-      currentEventIdRef: Ref[F, TypedIdentifier]
-    ) extends EventTree[F, Event, State] {
+    private class Impl[F[_]: Async, Event, State, UnapplyEvent](
+      eventAsUnapplyEvent: (Event, State) => F[UnapplyEvent],
+      applyEvent:          (State, Event) => F[State],
+      unapplyEvent:        (State, UnapplyEvent) => F[State],
+      eventStore:          StoreReader[F, Event],
+      unapplyEventStore:   Store[F, UnapplyEvent],
+      parentChildTree:     ParentChildTree[F, TypedIdentifier],
+      permit:              Resource[F, Unit],
+      currentStateRef:     Ref[F, State],
+      currentEventIdRef:   Ref[F, TypedIdentifier]
+    ) extends EventSourcedState[F, Event, State] {
 
       def stateAt(eventId: TypedIdentifier): F[State] =
         permit.use(_ =>
@@ -79,9 +84,9 @@ object EventTree {
       private def unapplyEvents(eventIds: Chain[TypedIdentifier], currentState: State): F[State] =
         eventIds.reverse.foldLeftM(currentState) { case (state, eventId) =>
           for {
-            delta    <- getDelta(eventId)
-            _        <- deltaStore.remove(eventId)
-            newState <- unapplyDelta(state, delta)
+            u        <- getUnapply(eventId)
+            _        <- unapplyEventStore.remove(eventId)
+            newState <- unapplyEvent(state, u)
             _        <- (currentStateRef.set(newState), currentEventIdRef.set(eventId)).tupled
           } yield newState
         }
@@ -90,9 +95,9 @@ object EventTree {
         eventIds.foldLeftM(currentState) { case (state, eventId) =>
           for {
             event    <- getEvent(eventId)
-            delta    <- eventAsDelta(event, state)
-            _        <- deltaStore.put(eventId, delta)
-            newState <- applyDelta(state, delta)
+            unapply  <- eventAsUnapplyEvent(event, state)
+            _        <- unapplyEventStore.put(eventId, unapply)
+            newState <- applyEvent(state, event)
             _        <- (currentStateRef.set(newState), currentEventIdRef.set(eventId)).tupled
           } yield newState
         }
@@ -101,8 +106,8 @@ object EventTree {
         OptionT(eventStore.get(eventId))
           .getOrElseF(MonadThrow[F].raiseError(new NoSuchElementException(eventId.toString)))
 
-      private def getDelta(eventId: TypedIdentifier): F[StateDelta] =
-        OptionT(deltaStore.get(eventId))
+      private def getUnapply(eventId: TypedIdentifier): F[UnapplyEvent] =
+        OptionT(unapplyEventStore.get(eventId))
           .getOrElseF(MonadThrow[F].raiseError(new NoSuchElementException(eventId.toString)))
     }
   }

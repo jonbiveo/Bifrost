@@ -4,19 +4,17 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import cats.data.{Chain, NonEmptyChain}
 import cats.effect.{Async, IO, IOApp}
+import cats.implicits._
+import co.topl.codecs.bytes.implicits._
+import co.topl.codecs.bytes.{ByteCodec, Reader, Writer}
 import co.topl.commoninterpreters.{AkkaSchedulerClock, LevelDbStore}
 import co.topl.models._
-import co.topl.typeclasses.implicits._
-import co.topl.codecs.bytes.implicits._
-import co.topl.codecs.bytes.ByteCodec.ops._
-
-import java.nio.file.Files
-import cats.implicits._
-import co.topl.codecs.bytes.{ByteCodec, Reader, Writer}
 import co.topl.models.utility.HasLength.instances.bytesLength
 import co.topl.models.utility.Sized
-import co.topl.typeclasses.{BlockGenesis, Identifiable}
+import co.topl.typeclasses.BlockGenesis
+import co.topl.typeclasses.implicits._
 
+import java.nio.file.Files
 import scala.collection.immutable.ListMap
 import scala.concurrent.duration._
 
@@ -131,7 +129,7 @@ object ConsensusStateTest extends IOApp.Simple {
         )
         Some((next, blocks :+ next))
       }
-      .take(30)
+      .take(50)
       .toList
 
   val tineB =
@@ -157,7 +155,7 @@ object ConsensusStateTest extends IOApp.Simple {
         )
         Some((next, blocks :+ next))
       }
-      .take(30)
+      .take(50)
       .toList
 
   val blocks: List[BlockV2] =
@@ -166,7 +164,7 @@ object ConsensusStateTest extends IOApp.Simple {
   def run: IO[Unit] =
     (for {
       eventStore <- LevelDbStore.Eval.make[F, BlockV2](Files.createTempDirectory("event-store-"))
-      deltaStore <- LevelDbStore.Eval.make[F, ConsensusStateDelta](Files.createTempDirectory("delta-store-"))
+      deltaStore <- LevelDbStore.Eval.make[F, ConsensusStateUnapply](Files.createTempDirectory("delta-store-"))
       tree       <- ParentChildTree.FromRef.make[F, TypedIdentifier]
       _ <- blocks.foldLeftM(()) { case (_, block) =>
         (
@@ -175,14 +173,14 @@ object ConsensusStateTest extends IOApp.Simple {
         ).tupled.void
       }
       clock = AkkaSchedulerClock.Eval.make[F](100.milli, 5L)
-      eventTree <- EventTree.Eval.make[F, BlockV2, ConsensusState[F], ConsensusStateDelta](
+      eventTree <- EventSourcedState.OfTree.make[F, BlockV2, ConsensusState[F], ConsensusStateUnapply](
         initialState = ConsensusState.LevelDB.make[F](Files.createTempDirectory("consensus-state"), clock),
         initialEventId = blocks.head.headerV2.parentHeaderId.pure[F],
-        eventAsDelta = (block, state) => state.createDelta(block),
-        applyDelta = (state, delta) => state.applyDelta(delta).map(_ => state),
-        unapplyDelta = (state, delta) => state.unapplyDelta(delta).map(_ => state),
+        eventAsUnapplyEvent = (block, state) => state.createUnapply(block),
+        applyEvent = (state, delta) => state.applyEvent(delta).as(state),
+        unapplyEvent = (state, delta) => state.unapplyEvent(delta).as(state),
         eventStore = eventStore,
-        deltaStore = deltaStore,
+        unapplyEventStore = deltaStore,
         parentChildTree = tree
       )
       sTineA     <- eventTree.stateAt(tineA.last.headerV2.id)
@@ -204,32 +202,18 @@ object ConsensusStateTest extends IOApp.Simple {
 
 object ConsensusStateCodecs {
 
-  implicit val consensusStateDeltaIdentifiable: Identifiable[ConsensusStateDelta] =
-    new Identifiable[ConsensusStateDelta] {
+  implicit val consensusDeltaCodec: ByteCodec[ConsensusStateUnapply] =
+    new ByteCodec[ConsensusStateUnapply] {
 
-      def idOf(t: ConsensusStateDelta): TypedIdentifier = t match {
-        case n: NormalConsensusDelta => n.blockId
-        case e: EpochCrossingDelta   => e.blockId
-      }
-
-      def typePrefix: TypePrefix = 1: Byte
-    }
-
-  implicit val consensusDeltaCodec: ByteCodec[ConsensusStateDelta] =
-    new ByteCodec[ConsensusStateDelta] {
-
-      def encode(t: ConsensusStateDelta, writer: Writer): Unit =
+      def encode(t: ConsensusStateUnapply, writer: Writer): Unit =
         t match {
-          case n: NormalConsensusDelta =>
+          case n: NormalConsensusUnapply =>
             writer.put(0)
-            ByteCodec[TypedIdentifier].encode(n.blockId, writer)
             ByteCodec[Seq[(TaktikosAddress, Box.Values.TaktikosRegistration)]].encode(n.registrations, writer)
             ByteCodec[Seq[TaktikosAddress]].encode(n.deregistrations, writer)
             ByteCodec[Seq[(TaktikosAddress, Option[Int128], Option[Int128])]].encode(n.stakeChanges, writer)
-          case e: EpochCrossingDelta =>
+          case e: EpochCrossingUnapply =>
             writer.put(1)
-            ByteCodec[TypedIdentifier].encode(e.blockId, writer)
-            ByteCodec[TypedIdentifier].encode(e.blockId, writer)
             ByteCodec[Seq[(TaktikosAddress, Box.Values.TaktikosRegistration)]]
               .encode(e.normalConsensusDelta.registrations, writer)
             ByteCodec[Seq[TaktikosAddress]].encode(e.normalConsensusDelta.deregistrations, writer)
@@ -246,20 +230,17 @@ object ConsensusStateCodecs {
               .encode(e.appliedStakeChanges, writer)
         }
 
-      def decode(reader: Reader): ConsensusStateDelta =
+      def decode(reader: Reader): ConsensusStateUnapply =
         reader.getByte() match {
           case 0 =>
-            NormalConsensusDelta(
-              ByteCodec[TypedIdentifier].decode(reader),
+            NormalConsensusUnapply(
               ByteCodec[Seq[(TaktikosAddress, Box.Values.TaktikosRegistration)]].decode(reader).toList,
               ByteCodec[Seq[TaktikosAddress]].decode(reader).toList,
               ByteCodec[Seq[(TaktikosAddress, Option[Int128], Option[Int128])]].decode(reader).toList
             )
           case 1 =>
-            EpochCrossingDelta(
-              ByteCodec[TypedIdentifier].decode(reader),
-              NormalConsensusDelta(
-                ByteCodec[TypedIdentifier].decode(reader),
+            EpochCrossingUnapply(
+              NormalConsensusUnapply(
                 ByteCodec[Seq[(TaktikosAddress, Box.Values.TaktikosRegistration)]].decode(reader).toList,
                 ByteCodec[Seq[TaktikosAddress]].decode(reader).toList,
                 ByteCodec[Seq[(TaktikosAddress, Option[Int128], Option[Int128])]].decode(reader).toList

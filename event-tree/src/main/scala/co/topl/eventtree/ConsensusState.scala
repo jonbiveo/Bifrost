@@ -19,34 +19,75 @@ import java.nio.file.{Path, Paths}
 import scala.jdk.CollectionConverters._
 
 trait ConsensusState[F[_]] {
-  def registrationOf(address:  TaktikosAddress): F[Option[Box.Values.TaktikosRegistration]]
+
+  /**
+   * Retrieve the registration for the given address.  The returned registration must be at least 2 epochs old
+   */
+  def registrationOf(address: TaktikosAddress): F[Option[Box.Values.TaktikosRegistration]]
+
+  /**
+   * Retrieve the relative stake for the given address.  The returned relative stake is based on transactions up to epoch N-2
+   */
   def relativeStakeOf(address: TaktikosAddress): F[Option[Ratio]]
-  def createDelta(block:       BlockV2): F[ConsensusStateDelta]
-  def applyDelta(delta:        ConsensusStateDelta): F[Unit]
-  def unapplyDelta(delta:      ConsensusStateDelta): F[Unit]
+
+  /**
+   * Turn a Block into a ConsensusDelta using the current state
+   */
+  def createUnapply(block: BlockV2): F[ConsensusStateUnapply]
+
+  /**
+   * Apply a ConsensusDelta to the current state
+   */
+  def applyEvent(block: BlockV2): F[Unit]
+
+  /**
+   * Undo a ConsensusDelta from the current state
+   */
+  def unapplyEvent(delta: ConsensusStateUnapply): F[Unit]
 }
 
-sealed abstract class ConsensusStateDelta
+/**
+ * Represents a change in ConsensusState, usually derived from a Block
+ */
+sealed abstract class ConsensusStateUnapply
 
-case class NormalConsensusDelta(
-  blockId:         TypedIdentifier,
+/**
+ * A ConsensusState change that takes place in the middle of an epoch.  We do not need to update any sort of "ledger"
+ * for these deltas; instead, the transaction data is simply recorded for future use
+ * @param registrations Any registrations that took place in this block
+ * @param deregistrations Any deregistrations that took place in this block
+ * @param stakeChanges Any stake/arbit changes that took place in this block
+ */
+case class NormalConsensusUnapply(
   registrations:   List[(TaktikosAddress, Box.Values.TaktikosRegistration)],
   deregistrations: List[TaktikosAddress],
   stakeChanges:    List[(TaktikosAddress, Option[Int128], Option[Int128])] // (address, old, new)
-) extends ConsensusStateDelta
+) extends ConsensusStateUnapply
 
-case class EpochCrossingDelta(
-  blockId:                TypedIdentifier,
-  normalConsensusDelta:   NormalConsensusDelta,
+/**
+ * A ConsensusState change that takes place at the dawn of a new epoch.  This delta applies values from epoch N-1 to the
+ * underlying state. The delta must track any registrations, deregistrations, expirations, and stake changes that are applied
+ * as a result of this delta such that they can be unapplied later
+ * @param normalConsensusDelta The normal changes that happened in this block
+ * @param appliedExpirations Any registrations that expired at the conclusion of the previous epoch
+ * @param appliedDeregistrations Any deregistrations that were applied by this delta
+ * @param appliedRegistrations Any registrations that were applied by this delta
+ * @param appliedStakeChanges Any stake changes that were applied by this delta
+ */
+case class EpochCrossingUnapply(
+  normalConsensusDelta:   NormalConsensusUnapply,
   newEpoch:               Epoch,
   appliedExpirations:     List[(TaktikosAddress, Box.Values.TaktikosRegistration, Epoch)],
   appliedDeregistrations: List[(TaktikosAddress, Box.Values.TaktikosRegistration, Epoch)],
   appliedRegistrations:   List[(TaktikosAddress, Box.Values.TaktikosRegistration, Epoch)],
   appliedStakeChanges:    List[(TaktikosAddress, Option[Int128], Option[Int128])] // (address, old, new)
-) extends ConsensusStateDelta
+) extends ConsensusStateUnapply
 
 object ConsensusState {
 
+  /**
+   * Implements a ConsensusState using several LevelDB databases
+   */
   object LevelDB {
     private val dbFactory = new Iq80DBFactory
 
@@ -103,6 +144,18 @@ object ConsensusState {
       )
     }
 
+    /**
+     * The implementation class
+     * @param metaDb a database for meta information, like CurrentEpoch and TotalStake
+     * @param activeRegistrationsDb Registrations that are active and valid for validation purposes (i.e. registered 2+ epochs ago)
+     * @param activeStakeDb Stake that is active and valid for validation purposes (i.e. transferred 2+ epochs ago)
+     * @param alphaRegistrationsDb Stores pending registrations.  "alpha" means this database is either the N-1 or N-2 store, depending on the CurrentEpoch
+     * @param alphaDeregistrationsDb Stores pending deregistrations.  "alpha" means this database is either the N-1 or N-2 store, depending on the CurrentEpoch
+     * @param alphaStakeChangesDb Stores pending stake changes.  "alpha" means this database is either the N-1 or N-2 store, depending on the CurrentEpoch
+     * @param betaRegistrationsDb Stores pending registrations.  "beta" means this database is either the N-1 or N-2 store, depending on the CurrentEpoch
+     * @param betaDeregistrationsDb  Stores pending stake changes.  "beta" means this database is either the N-1 or N-2 store, depending on the CurrentEpoch
+     * @param betaStakeChangesDb Stores pending stake changes.  "beta" means this database is either the N-1 or N-2 store, depending on the CurrentEpoch
+     */
     private class Impl[F[_]: Sync](
       metaDb:                 DB,
       activeRegistrationsDb:  DB,
@@ -143,115 +196,49 @@ object ConsensusState {
           .semiflatMap(stake => currentTotalStake.map(ts => Ratio(stake.data, ts.data)))
           .value
 
-      def createDelta(block: BlockV2): F[ConsensusStateDelta] =
+      def createUnapply(block: BlockV2): F[ConsensusStateUnapply] =
         for {
           previousEpoch <- currentEpoch
           newEpoch      <- clock.epochOf(block.headerV2.slot)
-          delta <- Monad[F].ifElseM[ConsensusStateDelta](
-            (previousEpoch === newEpoch).pure[F] -> calculateNormalDelta(block).widen[ConsensusStateDelta]
-          )(calculateEpochCrossingDelta(block, newEpoch).widen[ConsensusStateDelta])
+          delta <- Monad[F].ifElseM[ConsensusStateUnapply](
+            (previousEpoch === newEpoch).pure[F] -> createNormalUnapply(block).widen[ConsensusStateUnapply]
+          )(createEpochCrossingUnapply(block, newEpoch).widen[ConsensusStateUnapply])
         } yield delta
 
-      def applyDelta(delta: ConsensusStateDelta): F[Unit] =
+      def unapplyEvent(delta: ConsensusStateUnapply): F[Unit] =
         delta match {
-          case n: NormalConsensusDelta => applyNormalDelta(n)
-          case e: EpochCrossingDelta   => applyCrossingDelta(e)
+          case n: NormalConsensusUnapply => unapplyNormalDelta(n)
+          case e: EpochCrossingUnapply   => unapplyCrossingDelta(e)
         }
 
-      def unapplyDelta(delta: ConsensusStateDelta): F[Unit] =
-        delta match {
-          case n: NormalConsensusDelta => unapplyNormalDelta(n)
-          case e: EpochCrossingDelta   => unapplyCrossingDelta(e)
-        }
-
-      private def applyNormalDelta(delta: NormalConsensusDelta): F[Unit] =
+      private def unapplyNormalDelta(delta: NormalConsensusUnapply): F[Unit] =
         for {
           (pendingRegistrationsDb, pendingDeregistrationsDb, pendingStakeChangesDb) <- nMinus0Databases
           _ <- Sync[F].blocking {
             val b = pendingRegistrationsDb.createWriteBatch()
-            delta.registrations.foreach { case (addr, box) => b.put(addr.bytes.toArray, box.bytes.toArray) }
+            delta.registrations.foreach { case (addr, _) => b.delete(addr.bytes.toArray) }
             pendingRegistrationsDb.write(b)
             b.close()
           }
           _ <- Sync[F].blocking {
             val b = pendingDeregistrationsDb.createWriteBatch()
-            delta.deregistrations.foreach(addr => b.put(addr.bytes.toArray, Array.empty))
+            delta.deregistrations.foreach(addr => b.delete(addr.bytes.toArray))
             pendingDeregistrationsDb.write(b)
             b.close()
           }
           _ <- Sync[F].blocking {
             val b = pendingStakeChangesDb.createWriteBatch()
             delta.stakeChanges.foreach { case (addr, old, newStake) =>
-              b.put((addr, old, newStake).bytes.toArray, Array.emptyByteArray)
+              b.delete((addr, old, newStake).bytes.toArray)
             }
             pendingStakeChangesDb.write(b)
             b.close()
           }
         } yield ()
 
-      private def applyCrossingDelta(delta: EpochCrossingDelta): F[Unit] =
+      private def unapplyCrossingDelta(delta: EpochCrossingUnapply): F[Unit] =
         for {
-          _                                                                               <- applyDelta(delta.normalConsensusDelta)
-          (n1PendingRegistrationsDb, n1PendingDeregistrationsDb, n1PendingStakeChangesDb) <- nMinus1Databases
-          _                                                                               <- Sync[F].blocking(metaDb.put(CurrentEpochKey, delta.newEpoch.bytes.toArray))
-          _ <- Sync[F].blocking {
-            val batch1 = activeRegistrationsDb.createWriteBatch()
-            (delta.appliedExpirations.map(_._1) ++ delta.appliedDeregistrations.map(_._1))
-              .foreach { a =>
-                batch1.delete(eBytes ++ a.bytes.toArray)
-                batch1.delete(rBytes ++ a.bytes.toArray)
-              }
-            delta.appliedRegistrations.foreach { case (address, box, epoch) =>
-              batch1.put(eBytes ++ address.bytes.toArray, epoch.bytes.toArray)
-              batch1.put(rBytes ++ address.bytes.toArray, box.bytes.toArray)
-            }
-            activeRegistrationsDb.write(batch1)
-            batch1.close()
-          }
-          _ <- Sync[F].blocking {
-            val batch2 = activeStakeDb.createWriteBatch()
-            delta.appliedStakeChanges.foreach {
-              case (address, _, None) =>
-                batch2.delete(address.bytes.toArray)
-              case (address, _, Some(value)) =>
-                batch2.put(address.bytes.toArray, value.bytes.toArray)
-            }
-            activeStakeDb.write(batch2)
-            batch2.close()
-            clearDb(n1PendingRegistrationsDb)
-            clearDb(n1PendingDeregistrationsDb)
-            clearDb(n1PendingStakeChangesDb)
-          }
-        } yield ()
-
-      private def unapplyNormalDelta(delta: NormalConsensusDelta): F[Unit] =
-        for {
-          (pendingRegistrationsDb, pendingDeregistrationsDb, pendingStakeChangesDb) <- nMinus0Databases
-          _ <- Sync[F].blocking {
-            val b = pendingRegistrationsDb.createWriteBatch()
-            delta.registrations.foreach { case (addr, box) => b.put(addr.bytes.toArray, box.bytes.toArray) }
-            pendingRegistrationsDb.write(b)
-            b.close()
-          }
-          _ <- Sync[F].blocking {
-            val b = pendingDeregistrationsDb.createWriteBatch()
-            delta.deregistrations.foreach(addr => b.put(addr.bytes.toArray, Array.empty))
-            pendingDeregistrationsDb.write(b)
-            b.close()
-          }
-          _ <- Sync[F].blocking {
-            val b = pendingStakeChangesDb.createWriteBatch()
-            delta.stakeChanges.foreach { case (addr, old, newStake) =>
-              b.put((addr, old, newStake).bytes.toArray, Array.emptyByteArray)
-            }
-            pendingStakeChangesDb.write(b)
-            b.close()
-          }
-        } yield ()
-
-      private def unapplyCrossingDelta(delta: EpochCrossingDelta): F[Unit] =
-        for {
-          _                                                                               <- unapplyDelta(delta.normalConsensusDelta)
+          _                                                                               <- unapplyNormalDelta(delta.normalConsensusDelta)
           (n0PendingRegistrationsDb, n0PendingDeregistrationsDb, n0PendingStakeChangesDb) <- nMinus0Databases
           _                                                                               <- Sync[F].blocking(metaDb.put(CurrentEpochKey, (delta.newEpoch - 1).bytes.toArray))
           _ <- Sync[F].blocking {
@@ -312,7 +299,168 @@ object ConsensusState {
         )
           .map(byteArray => Bytes(byteArray).decoded[Int128])
 
-      private def calculateNormalDelta(block: BlockV2): F[NormalConsensusDelta] =
+      def applyEvent(block: BlockV2): F[Unit] =
+        Sync[F].defer(
+          for {
+            previousEpoch <- currentEpoch
+            newEpoch      <- clock.epochOf(block.headerV2.slot)
+            _ <- Monad[F].ifElseM[Unit](
+              (previousEpoch === newEpoch).pure[F] -> Sync[F].defer(applyNormalEvent(block))
+            )(Sync[F].defer(applyEpochCrossingEvent(block, newEpoch)))
+          } yield ()
+        )
+
+      private def applyNormalEvent(block: BlockV2): F[Unit] =
+        for {
+          (pendingRegistrationsDb, pendingDeregistrationsDb, pendingStakeChangesDb) <- nMinus0Databases
+          arbitOutputs = block.blockBodyV2.transactions
+            .flatMap(_.coinOutputs.collect { case a: Transaction.CoinOutputs.Arbit => a }.toList)
+            .toList
+          stakeChanges <- arbitOutputs
+            .traverse { case Transaction.CoinOutputs.Arbit(_, taktikosAddress, value) =>
+              stakeOf(taktikosAddress).fold[(TaktikosAddress, Option[Int128], Option[Int128])](
+                (taktikosAddress, None, value.some)
+              )(stake => (taktikosAddress, stake.some, Some(Sized.maxUnsafe(stake.data + value.data))))
+            }
+          _ <- Sync[F].blocking {
+            val b = pendingStakeChangesDb.createWriteBatch()
+            stakeChanges.foreach { case (addr, old, newStake) =>
+              b.put((addr, old, newStake).bytes.toArray, Array.emptyByteArray)
+            }
+            pendingStakeChangesDb.write(b)
+            b.close()
+          }
+
+          registrations = block.blockBodyV2.transactions
+            .flatMap(
+              _.consensusOutputs.collect { case Transaction.ConsensusOutputs.Registration(address, commitment) =>
+                address -> Box.Values.TaktikosRegistration(commitment)
+              }.toList
+            )
+            .toList
+          _ <- Sync[F].blocking {
+            val b = pendingRegistrationsDb.createWriteBatch()
+            registrations.foreach { case (addr, box) => b.put(addr.bytes.toArray, box.bytes.toArray) }
+            pendingRegistrationsDb.write(b)
+            b.close()
+          }
+
+          deregistrations = block.blockBodyV2.transactions
+            .flatMap(
+              _.consensusOutputs.collect { case Transaction.ConsensusOutputs.Deregistration(address) =>
+                address
+              }.toList
+            )
+            .toList
+
+          _ <- Sync[F].blocking {
+            val b = pendingDeregistrationsDb.createWriteBatch()
+            deregistrations.foreach(addr => b.put(addr.bytes.toArray, Array.empty))
+            pendingDeregistrationsDb.write(b)
+            b.close()
+          }
+        } yield ()
+
+      private def applyEpochCrossingEvent(block: BlockV2, newEpoch: Epoch): F[Unit] =
+        for {
+          (n1PendingRegistrationsDb, n1PendingDeregistrationsDb, n1PendingStakeChangesDb) <- nMinus1Databases
+          addressesToExpire                                                               <- expiringRegistrations(newEpoch)
+          registrationsToExpire <- addressesToExpire.traverse(a =>
+            (
+              a.pure[F],
+              getOrNoSuchElement(registrationOf(a), a.show),
+              getOrNoSuchElement(registrationEpochOf(a), a.show)
+            ).tupled
+          )
+          deregistrationsToApply <-
+            Sync[F]
+              .blocking {
+                val it = n1PendingRegistrationsDb.iterator()
+                it.seekToFirst()
+                val res = it.asScala.map(_.getKey).toList
+                it.close()
+                res
+              }
+              .map(_.map(Bytes(_).decoded[TaktikosAddress]))
+              .flatMap(
+                _.traverse(a =>
+                  (
+                    a.pure[F],
+                    getOrNoSuchElement(registrationOf(a), a.show),
+                    getOrNoSuchElement(registrationEpochOf(a), a.show)
+                  ).tupled
+                )
+              )
+          registrationsToApply <-
+            Sync[F]
+              .blocking {
+                val it = n1PendingRegistrationsDb.iterator()
+                it.seekToFirst()
+                val res = it.asScala.toList
+                it.close()
+                res
+              }
+              .map(
+                _.map(e =>
+                  (
+                    Bytes(e.getKey).decoded[TaktikosAddress],
+                    Bytes(e.getValue).decoded[Box.Values.TaktikosRegistration],
+                    newEpoch - 2
+                  )
+                )
+              )
+          stakeChangesToApply <-
+            Sync[F]
+              .blocking {
+                val it = n1PendingStakeChangesDb.iterator()
+                it.seekToFirst()
+                val res = it.asScala.map(_.getKey).toList
+                it.close()
+                res
+              }
+              .map(
+                _.map(
+                  Bytes(_).decoded[(TaktikosAddress, Option[Int128], Option[Int128])]
+                )
+              )
+
+          _ <- applyNormalEvent(block)
+          _ <- Sync[F].blocking(metaDb.put(CurrentEpochKey, newEpoch.bytes.toArray))
+
+          _ <- Sync[F].blocking {
+            val activeRegistrationsBatch = activeRegistrationsDb.createWriteBatch()
+            (registrationsToExpire.map(_._1) ++ deregistrationsToApply.map(_._1))
+              .foreach { a =>
+                activeRegistrationsBatch.delete(eBytes ++ a.bytes.toArray)
+                activeRegistrationsBatch.delete(rBytes ++ a.bytes.toArray)
+              }
+            registrationsToApply.foreach { case (address, box, epoch) =>
+              activeRegistrationsBatch.put(eBytes ++ address.bytes.toArray, epoch.bytes.toArray)
+              activeRegistrationsBatch.put(rBytes ++ address.bytes.toArray, box.bytes.toArray)
+            }
+            activeRegistrationsDb.write(activeRegistrationsBatch)
+            activeRegistrationsBatch.close()
+          }
+
+          _ <- Sync[F].blocking {
+            // TODO: Update Total Stake
+            // TODO: Subtract stake that is "spent"
+            val activeStakeBatch = activeStakeDb.createWriteBatch()
+            stakeChangesToApply.foreach {
+              case (address, _, None) =>
+                activeStakeBatch.delete(address.bytes.toArray)
+              case (address, _, Some(value)) =>
+                activeStakeBatch.put(address.bytes.toArray, value.bytes.toArray)
+            }
+            activeStakeDb.write(activeStakeBatch)
+            activeStakeBatch.close()
+            clearDb(n1PendingRegistrationsDb)
+            clearDb(n1PendingDeregistrationsDb)
+            clearDb(n1PendingStakeChangesDb)
+          }
+        } yield ()
+
+      private def createNormalUnapply(block: BlockV2): F[NormalConsensusUnapply] =
         Sync[F].defer(
           block.blockBodyV2.transactions
             .flatMap(_.coinOutputs.collect { case a: Transaction.CoinOutputs.Arbit => a }.toList)
@@ -323,8 +471,7 @@ object ConsensusState {
               )(stake => (taktikosAddress, stake.some, Some(Sized.maxUnsafe(stake.data + value.data))))
             }
             .map(stakeChanges =>
-              NormalConsensusDelta(
-                block.headerV2.id,
+              NormalConsensusUnapply(
                 block.blockBodyV2.transactions
                   .flatMap(
                     _.consensusOutputs.collect { case Transaction.ConsensusOutputs.Registration(address, commitment) =>
@@ -358,10 +505,10 @@ object ConsensusState {
           }
           .map(_.map(e => Bytes(e.getKey.drop(eBytes.length)).decoded[TaktikosAddress]))
 
-      private def calculateEpochCrossingDelta(block: BlockV2, newEpoch: Epoch): F[EpochCrossingDelta] =
+      private def createEpochCrossingUnapply(block: BlockV2, newEpoch: Epoch): F[EpochCrossingUnapply] =
         Sync[F].defer(
           for {
-            normalDelta       <- calculateNormalDelta(block)
+            normalDelta       <- createNormalUnapply(block)
             addressesToExpire <- expiringRegistrations(newEpoch)
             registrationsToExpire <- addressesToExpire.traverse(a =>
               (
@@ -427,8 +574,7 @@ object ConsensusState {
                   Bytes(_).decoded[(TaktikosAddress, Option[Int128], Option[Int128])]
                 )
               )
-          } yield EpochCrossingDelta(
-            block.headerV2.id,
+          } yield EpochCrossingUnapply(
             normalDelta,
             newEpoch,
             registrationsToExpire,
@@ -453,42 +599,6 @@ object ConsensusState {
             case 1 => (alphaRegistrationsDb, alphaDeregistrationsDb, alphaStakeChangesDb)
           }
         )
-
-      private def currentPendingRegistrations: F[List[(TaktikosAddress, Box.Values.TaktikosRegistration, Epoch)]] =
-        Sync[F]
-          .blocking {
-            val it = activeRegistrationsDb.iterator()
-            // pr = pending registration
-            it.seek(prBytes)
-            val r = it.asScala.takeWhile(_.getKey.startsWith(prBytes)).toList
-            it.close()
-            r
-          }
-          .map(r =>
-            r.map { e =>
-              val address = Bytes(e.getKey.drop(prBytes.length)).decoded[TaktikosAddress]
-              val (registration, epoch) = Bytes(e.getValue).decoded[(Box.Values.TaktikosRegistration, Epoch)]
-              (address, registration, epoch)
-            }
-          )
-
-      private def currentPendingDeregistrations: F[List[(TaktikosAddress, Epoch)]] =
-        Sync[F]
-          .blocking {
-            val it = activeRegistrationsDb.iterator()
-            // pr = pending registration
-            it.seek(pdBytes)
-            val r = it.asScala.takeWhile(_.getKey.startsWith(pdBytes)).toList
-            it.close()
-            r
-          }
-          .map(r =>
-            r.map { e =>
-              val address = Bytes(e.getKey.drop(pdBytes.length)).decoded[TaktikosAddress]
-              val epoch = Bytes(e.getValue).decoded[Epoch]
-              (address, epoch)
-            }
-          )
 
       private def clearDb(db: DB): Unit = {
         val it = db.iterator()
