@@ -11,6 +11,8 @@ service ToplGrpc {
   rpc FetchBlockBody (FetchBlockBodyReq) returns (FetchBlockBodyRes);
   rpc FetchTransaction (FetchTransactionReq) returns (FetchTransactionRes);
 
+  rpc FetchBlockIdAtHeight (FetchBlockIdAtHeightReq) returns (FetchBlockIdAtHeightRes);
+
   rpc CurrentMempool (CurrentMempoolReq) returns (CurrentMempoolRes);
 }
 
@@ -52,6 +54,14 @@ message FetchTransactionRes {
   Transaction transaction = 1;
   // Debug data
   int32 transmittableBytesLength = 2;
+}
+
+message FetchBlockIdAtHeightReq {
+  int64 height = 1;
+}
+
+message FetchBlockIdAtHeightRes {
+  bytes blockId = 1;
 }
 
 message CurrentMempoolReq {}

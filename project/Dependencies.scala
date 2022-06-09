@@ -153,6 +153,13 @@ object Dependencies {
     "com.lihaoyi" %% "mainargs" % "0.2.2"
   )
 
+  val orientDb: Seq[ModuleID] = {
+    val version = "3.2.7"
+    Seq(
+      "com.orientechnologies" % "orientdb-graphdb" % version
+    )
+  }
+
   val node: Seq[ModuleID] =
     Seq(
       "com.typesafe.akka"          %% "akka-cluster"       % akkaVersion,
@@ -331,7 +338,8 @@ object Dependencies {
     cats ++
     mainargs ++
     misc ++
-    test
+    test ++
+    orientDb
 
   lazy val munitScalamock =
     mUnitTest

@@ -117,7 +117,8 @@ object DemoProgram {
         syntacticValidation,
         offerRpcTransaction,
         localChain,
-        locallyAdoptedBlocksSource.pure[F]
+        locallyAdoptedBlocksSource.pure[F],
+        blockHeights
       )
       rpcServer = ToplGrpc.Server.serve(rpcHost, rpcPort, rpcInterpreter)
       _ <- rpcTransactionsSource
@@ -208,7 +209,8 @@ object DemoProgram {
     syntacticValidation:       SyntacticValidationAlgebra[F],
     broadcastTransactionToP2P: Transaction => F[Unit],
     localChain:                LocalChainAlgebra[F],
-    locallyAdoptedBlocks:      F[SourceMatNotUsed[TypedIdentifier]]
+    locallyAdoptedBlocks:      F[SourceMatNotUsed[TypedIdentifier]],
+    blockHeights:              EventSourcedState[F, Long => F[Option[TypedIdentifier]]]
   ) =
     new ToplRpc[F, SourceMatNotUsed] {
 
@@ -239,6 +241,11 @@ object DemoProgram {
 
       def currentMempool(): F[Set[TypedIdentifier]] =
         localChain.head.map(_.slotId.blockId).flatMap(mempool.read)
+
+      def fetchBlockIdAtHeight(height: Slot): F[Option[TypedIdentifier]] =
+        localChain.head
+          .map(_.slotId.blockId)
+          .flatMap(blockHeights.useStateAt(_)(_.apply(height)))
     }
 
   private def syntacticValidateOrRaise[F[_]: MonadThrow: Logger](

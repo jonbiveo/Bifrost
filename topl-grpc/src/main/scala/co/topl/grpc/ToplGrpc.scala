@@ -35,10 +35,10 @@ object ToplGrpc {
      */
     def make[F[_]: Async](host: String, port: Int, tls: Boolean)(implicit
       systemProvider:           ClassicActorSystemProvider
-    ): F[ToplRpc[F, Source[*, NotUsed]]] =
+    ): F[ToplRpc[F, SourceMatNotUsed]] =
       Async[F].delay {
         val client = services.ToplGrpcClient(GrpcClientSettings.connectToServiceAt(host, port).withTls(tls))
-        new ToplRpc[F, Source[*, NotUsed]] {
+        new ToplRpc[F, SourceMatNotUsed] {
           def broadcastTransaction(transaction: Transaction): F[Unit] =
             Async[F]
               .fromFuture(
@@ -189,6 +189,17 @@ object ToplGrpc {
                   .toEither
               )
               .rethrow
+
+          def fetchBlockIdAtHeight(height: Slot): F[Option[TypedIdentifier]] =
+            Async[F]
+              .fromFuture(
+                Async[F].delay(
+                  client.fetchBlockIdAtHeight(
+                    services.FetchBlockIdAtHeightReq(height)
+                  )
+                )
+              )
+              .map(res => res.blockId.some.filter(_.nonEmpty).map(TypedBytes(_)))
         }
       }
   }
@@ -201,7 +212,7 @@ object ToplGrpc {
      * @param port The port to bind
      * @param interpreter The interpreter which fulfills the data requests
      */
-    def serve[F[_]: Async: FToFuture](host: String, port: Int, interpreter: ToplRpc[F, Source[*, NotUsed]])(implicit
+    def serve[F[_]: Async: FToFuture](host: String, port: Int, interpreter: ToplRpc[F, SourceMatNotUsed])(implicit
       systemProvider:                       ClassicActorSystemProvider
     ): Resource[F, Http.ServerBinding] =
       Resource.make(
@@ -214,7 +225,7 @@ object ToplGrpc {
         )
       )(binding => Async[F].fromFuture(Async[F].delay(binding.unbind())).void)
 
-    private[grpc] class GrpcServerImpl[F[_]: MonadThrow: FToFuture](interpreter: ToplRpc[F, Source[*, NotUsed]])
+    private[grpc] class GrpcServerImpl[F[_]: MonadThrow: FToFuture](interpreter: ToplRpc[F, SourceMatNotUsed])
         extends services.ToplGrpc {
 
       def broadcastTransaction(in: services.BroadcastTransactionReq): Future[services.BroadcastTransactionRes] =
@@ -339,6 +350,13 @@ object ToplGrpc {
               v.vrfCommitment.transmittableBytes
             )
         }
+
+      def fetchBlockIdAtHeight(in: services.FetchBlockIdAtHeightReq): Future[services.FetchBlockIdAtHeightRes] =
+        implicitly[FToFuture[F]].apply(
+          OptionT(interpreter.fetchBlockIdAtHeight(in.height))
+            .fold(ByteString.EMPTY)(_.allBytes)
+            .map(services.FetchBlockIdAtHeightRes(_))
+        )
     }
   }
 

@@ -696,7 +696,7 @@ lazy val genus = project
     libraryDependencies ++= Dependencies.genus
   )
   .enablePlugins(AkkaGrpcPlugin)
-  .dependsOn(common)
+  .dependsOn(common, toplGrpc)
 
 lazy val munitScalamock = project
   .in(file("munit-scalamock"))
