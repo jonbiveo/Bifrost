@@ -1,17 +1,17 @@
 package co.topl.genus.interpreters.orientdb
 
+import com.orientechnologies.orient.core.metadata.schema.OClass
+
 object NodeTypes {
   case object CanonicalHead
 
   case class Header(
-    id:             String,
-    parentHeaderId: String,
-    parentSlot:     Long,
-    txRoot:         String,
-    timestamp:      Long,
-    height:         Long,
-    slot:           Long,
-    address:        String
+    id:        String,
+    txRoot:    String,
+    timestamp: Long,
+    height:    Long,
+    slot:      Long,
+    address:   String
   )
 
   case class Transaction(
@@ -42,27 +42,25 @@ object NodeTypes {
 object NodeSchemas {
 
   implicit val canonicalHeadNodeSchema: NodeSchema[NodeTypes.CanonicalHead.type] =
-    NodeSchema.create("CanonicalHead", _ => Map.empty, _ => NodeTypes.CanonicalHead)
+    NodeSchema.create("CanonicalHead", GraphDataEncoder[NodeTypes.CanonicalHead.type], _ => NodeTypes.CanonicalHead)
 
   implicit val headerNodeSchema: NodeSchema[NodeTypes.Header] =
     NodeSchema.create(
       "Header",
-      h =>
-        Map(
-          "id"             -> h.id,
-          "parentHeaderId" -> h.parentHeaderId,
-          "parentSlot"     -> h.parentSlot,
-          "txRoot"         -> h.txRoot,
-          "timestamp"      -> h.timestamp,
-          "height"         -> h.height,
-          "slot"           -> h.slot,
-          "address"        -> h.address
-        ),
+      GraphDataEncoder[NodeTypes.Header]
+        .withProperty("blockId", _.id, Set(("UniqueBlockId", OClass.INDEX_TYPE.UNIQUE)))
+        .withProperty("txRoot", _.txRoot)
+        .withProperty[java.lang.Long](
+          "timestamp",
+          t => Long.box(t.timestamp),
+          Set(("TimestampIdx", OClass.INDEX_TYPE.NOTUNIQUE))
+        )
+        .withProperty[java.lang.Long]("height", _.height, Set(("HeightIdx", OClass.INDEX_TYPE.NOTUNIQUE)))
+        .withProperty[java.lang.Long]("slot", _.slot, Set(("SlotIdx", OClass.INDEX_TYPE.NOTUNIQUE)))
+        .withProperty("address", _.address, Set(("AddressIdx", OClass.INDEX_TYPE.NOTUNIQUE))),
       v =>
         NodeTypes.Header(
-          v("id"),
-          v("parentHeaderId"),
-          v("parentSlot"),
+          v("blockId"),
           v("txRoot"),
           v("timestamp"),
           v("height"),
@@ -74,17 +72,15 @@ object NodeSchemas {
   implicit val transactionNodeSchema: NodeSchema[NodeTypes.Transaction] =
     NodeSchema.create(
       "Transaction",
-      t =>
-        Map(
-          "id"                -> t.id,
-          "creationTimestamp" -> t.creationTimestamp,
-          "minimumSlot"       -> t.minimumSlot,
-          "maximumSlot"       -> t.maximumSlot,
-          "data"              -> t.data
-        ),
+      GraphDataEncoder[NodeTypes.Transaction]
+        .withProperty("transactionId", _.id, Set(("UniqueTransactionId", OClass.INDEX_TYPE.UNIQUE)))
+        .withProperty[java.lang.Long]("creationTimestamp", _.creationTimestamp)
+        .withProperty[java.lang.Long]("minimumSlot", _.minimumSlot)
+        .withProperty[java.lang.Long]("maximumSlot", _.maximumSlot)
+        .withProperty("data", _.data),
       v =>
         NodeTypes.Transaction(
-          v("id"),
+          v("transactionId"),
           v("creationTimestamp"),
           v("minimumSlot"),
           v("maximumSlot"),
@@ -95,14 +91,18 @@ object NodeSchemas {
   implicit val transactionInputNodeSchema: NodeSchema[NodeTypes.TransactionInput] =
     NodeSchema.create(
       "TransactionInput",
-      t => Map("proposition" -> t.proposition, "proof" -> t.proof),
+      GraphDataEncoder[NodeTypes.TransactionInput]
+        .withProperty("proposition", _.proposition)
+        .withProperty("proof", _.proof),
       v => NodeTypes.TransactionInput(v("proposition"), v("proof"))
     )
 
   implicit val transactionOutputNodeSchema: NodeSchema[NodeTypes.TransactionOutput] =
     NodeSchema.create(
       "TransactionOutput",
-      t => Map("address" -> t.address, "minting" -> t.minting),
+      GraphDataEncoder[NodeTypes.TransactionOutput]
+        .withProperty("address", _.address)
+        .withProperty[java.lang.Boolean]("minting", _.minting),
       v => NodeTypes.TransactionOutput(v("address"), v("minting"))
     )
 }

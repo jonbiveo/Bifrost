@@ -13,34 +13,38 @@ object EdgeSchemas {
 
   implicit val canonicalHeadEdgeSchema
     : EdgeSchema[EdgeTypes.CanonicalHead.type, NodeTypes.CanonicalHead.type, NodeTypes.Header] =
-    EdgeSchema.create("CanonicalHead", _ => Map.empty, _ => EdgeTypes.CanonicalHead)
+    EdgeSchema.create("CanonicalHeadE", GraphDataEncoder.apply, _ => EdgeTypes.CanonicalHead)
 
   implicit val headerToParentEdgeSchema
     : EdgeSchema[EdgeTypes.HeaderToParentHeader.type, NodeTypes.Header, NodeTypes.Header] =
-    EdgeSchema.create("HeaderToParentHeader", _ => Map.empty, _ => EdgeTypes.HeaderToParentHeader)
+    EdgeSchema.create("HeaderToParentHeader", GraphDataEncoder.apply, _ => EdgeTypes.HeaderToParentHeader)
 
   implicit val transactionToHeaderEdgeSchema
     : EdgeSchema[EdgeTypes.TransactionToHeader, NodeTypes.Transaction, NodeTypes.Header] =
     EdgeSchema.create(
       "TransactionToHeader",
-      t => Map("index" -> t.index),
+      GraphDataEncoder[EdgeTypes.TransactionToHeader].withProperty[java.lang.Short]("index", _.index),
       v => EdgeTypes.TransactionToHeader(v("index"))
     )
 
   implicit val transactionToInputEdgeSchema
     : EdgeSchema[EdgeTypes.TransactionToInput, NodeTypes.Transaction, NodeTypes.TransactionInput] =
-    EdgeSchema.create("TransactionToInput", t => Map("index" -> t.index), v => EdgeTypes.TransactionToInput(v("index")))
+    EdgeSchema.create(
+      "TransactionToInput",
+      GraphDataEncoder[EdgeTypes.TransactionToInput].withProperty[java.lang.Short]("index", _.index),
+      v => EdgeTypes.TransactionToInput(v("index"))
+    )
 
   implicit val transactionToOutputEdgeSchema
     : EdgeSchema[EdgeTypes.TransactionToOutput, NodeTypes.Transaction, NodeTypes.TransactionOutput] =
     EdgeSchema.create(
       "TransactionToOutput",
-      t => Map("index" -> t.index),
+      GraphDataEncoder[EdgeTypes.TransactionToOutput].withProperty[java.lang.Short]("index", _.index),
       v => EdgeTypes.TransactionToOutput(v("index"))
     )
 
   implicit val inputToOutputEdgeSchema
     : EdgeSchema[EdgeTypes.InputToOutput.type, NodeTypes.TransactionInput, NodeTypes.TransactionOutput] =
-    EdgeSchema.create("InputToOutput", _ => Map.empty, _ => EdgeTypes.InputToOutput)
+    EdgeSchema.create("InputToOutput", GraphDataEncoder.apply, _ => EdgeTypes.InputToOutput)
 
 }

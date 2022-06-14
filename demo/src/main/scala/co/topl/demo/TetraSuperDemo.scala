@@ -401,7 +401,7 @@ object TetraSuperDemo extends IOApp {
                   peer.coordinate,
                   durationPerKilometer = 1.micros,
                   durationPerByte = 1.micros,
-                  noise = 500.milli
+                  noise = 1.micros
                 )
               Flow[ByteString].via(delayer).viaMat(flow)(Keep.right).via(delayer)
             },
