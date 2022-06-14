@@ -20,7 +20,7 @@ class ToplGrpcSpec extends CatsEffectSuite with ScalaCheckEffectSuite with Async
   test("A transaction can be broadcast") {
     PropF.forAllF { (transaction: Transaction) =>
       withMock {
-        val interpreter = mock[ToplRpc[F]]
+        val interpreter = mock[ToplRpc[F, SourceMatNotUsed]]
         val underTest = new ToplGrpc.Server.GrpcServerImpl[F](interpreter)
 
         (interpreter.broadcastTransaction _)

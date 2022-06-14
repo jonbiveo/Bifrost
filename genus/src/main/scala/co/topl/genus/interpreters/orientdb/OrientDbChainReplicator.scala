@@ -1,6 +1,6 @@
 package co.topl.genus.interpreters.orientdb
 
-import akka.stream.scaladsl.{Flow, Keep, RunnableGraph, Sink, Source}
+import akka.stream.scaladsl.{Keep, RunnableGraph, Sink, Source}
 import cats.data.OptionT
 import cats.effect.Async
 import cats.implicits._
@@ -213,12 +213,11 @@ object OrientDbChainReplicator {
                   .withEdgeTo(
                     EdgeTypes.InputToOutput,
                     Raw[NodeTypes.TransactionOutput](
-                      s"""SELECT expand($$tOut.out)
-                         |  FROM ${NodeSchemas.transactionNodeSchema.name}
-                         |  LET $$tOut = outE('${EdgeSchemas.inputToOutputEdgeSchema.name}')
-                         |  WHERE blockId = ? AND $$tOut.index = ?
+                      s"""SELECT expand(outE('TransactionToOutput')[index = ?].outV())
+                         |  FROM Transaction
+                         |  WHERE transactionId = ?
                          |""".stripMargin,
-                      Array(stringifyId(input.boxId.transactionId), input.boxId.transactionOutputIndex)
+                      Array(input.boxId.transactionOutputIndex, stringifyId(input.boxId.transactionId))
                     )
                   )
                   .run()

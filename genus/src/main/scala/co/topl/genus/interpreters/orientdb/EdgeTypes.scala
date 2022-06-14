@@ -6,6 +6,7 @@ object EdgeTypes {
   case class TransactionToHeader(index: Short)
   case class TransactionToInput(index: Short)
   case class TransactionToOutput(index: Short)
+  // TODO: OutputAsInput
   case object InputToOutput
 }
 

@@ -148,7 +148,7 @@ object OrientDb {
               throw new NoSuchElementException(s"`$q` Args: ${args.mkString(",")}")
             },
             v,
-            ""
+            null
           )
           e._2.foreach { case (key, value) => edge.setProperty(key, value) }
         }

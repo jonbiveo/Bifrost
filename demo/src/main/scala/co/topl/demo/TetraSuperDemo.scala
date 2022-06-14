@@ -4,7 +4,7 @@ import akka.actor.typed.ActorSystem
 import akka.actor.typed.scaladsl.Behaviors
 import akka.stream.scaladsl.{Flow, Keep, Source}
 import akka.util.{ByteString, Timeout}
-import cats.data.OptionT
+import cats.data.{Chain, OptionT}
 import cats.effect.implicits._
 import cats.effect.kernel.Sync
 import cats.effect.unsafe.{IORuntime, IORuntimeConfig}
@@ -96,8 +96,27 @@ object TetraSuperDemo extends IOApp {
     Staker(Ratio(1, count), stakerVrfKey, kesKey, stakerRegistration, StakingAddresses.Operator(poolVK))
   }
 
+  private val genesisTransaction =
+    Transaction(
+      inputs = Chain.empty,
+      outputs = Chain(
+        Transaction.Output(
+          FullAddress(
+            NetworkPrefix(1),
+            Propositions.Contextual.HeightLock(1L).spendingAddress,
+            StakingAddresses.Operator(VerificationKeys.Ed25519(Sized.strictUnsafe(Bytes.fill(32)(0: Byte)))),
+            Proofs.Knowledge.Ed25519(Sized.strictUnsafe(Bytes.fill(64)(0: Byte)))
+          ),
+          Box.Values.Poly(Sized.maxUnsafe(BigInt(10_000L))),
+          minting = true
+        )
+      ),
+      chronology = Transaction.Chronology(0L, 0L, Long.MaxValue),
+      None
+    )
+
   private val genesis =
-    BlockGenesis(Nil).value
+    BlockGenesis(List(genesisTransaction)).value
 
   // Actor system initialization
 
@@ -302,6 +321,7 @@ object TetraSuperDemo extends IOApp {
         blockHeaderStore <- RefStore.Eval.make[F, TypedIdentifier, BlockHeaderV2]()
         blockBodyStore   <- RefStore.Eval.make[F, TypedIdentifier, BlockBodyV2]()
         transactionStore <- RefStore.Eval.make[F, TypedIdentifier, Transaction]()
+        _                <- transactionStore.put(genesisTransaction.id, genesisTransaction)
         _                <- blockHeaderStore.put(genesis.headerV2.id, genesis.headerV2)
         _                <- blockBodyStore.put(genesis.headerV2.id, genesis.blockBodyV2)
         slotDataCache    <- SlotDataCache.Eval.make(blockHeaderStore, ed25519VRFResource)
