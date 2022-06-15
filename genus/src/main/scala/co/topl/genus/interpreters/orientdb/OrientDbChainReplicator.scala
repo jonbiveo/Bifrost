@@ -2,7 +2,7 @@ package co.topl.genus.interpreters.orientdb
 
 import akka.stream.scaladsl.{Keep, RunnableGraph, Sink, Source}
 import cats.data.OptionT
-import cats.effect.Async
+import cats.effect.{Async, Sync}
 import cats.implicits._
 import cats.{~>, Applicative, Parallel, Traverse}
 import co.topl.algebras.ToplRpc
@@ -15,6 +15,7 @@ import co.topl.genus.interpreters.orientdb.NodeSchemas._
 import co.topl.genus.interpreters.orientdb.OrientDb._
 import co.topl.models.{BlockHeaderV2, Transaction, TypedIdentifier}
 import co.topl.typeclasses.implicits._
+import com.tinkerpop.blueprints.Direction
 import com.tinkerpop.blueprints.impls.orient.OrientBaseGraph
 import org.typelevel.log4cats.Logger
 
@@ -198,29 +199,48 @@ object OrientDbChainReplicator {
                 NodesByClass[NodeTypes.Header](Where.PropEquals("blockId", blockIdString))
               )
               _ <- transaction.inputs.traverseWithIndexM((input, inputIndex) =>
-                Logger[F].info(show"Creating transaction input id=$transactionIdString index=$inputIndex") >>
-                graph
-                  .insertNodeBuilder(
-                    NodeTypes.TransactionInput(
-                      input.proposition.immutableBytes.toBase58,
-                      input.proof.immutableBytes.toBase58
+                Logger[F].info(
+                  show"Creating transaction input id=$transactionIdString index=$inputIndex"
+                ) >>
+                Logger[F].info(
+                  show"Connecting input of transaction inputTransactionId=${transactionIdString} inputIndex=$inputIndex" +
+                  show" to previous outputTransactionId=${input.boxId.transactionId} outputTransactionIndex=${input.boxId.transactionOutputIndex}"
+                ) >>
+                Sync[F].blocking {
+                  val inputV = graph.addVertex(s"class:${NodeSchemas.transactionInputNodeSchema.name}")
+                  NodeSchemas.transactionInputNodeSchema
+                    .encode(
+                      NodeTypes.TransactionInput(
+                        input.proposition.immutableBytes.toBase58,
+                        input.proof.immutableBytes.toBase58
+                      )
                     )
-                  )
-                  .withEdgeFrom(
-                    EdgeTypes.TransactionToInput(inputIndex.toShort),
-                    NodesByClass[NodeTypes.Transaction](Where.PropEquals("transactionId", transactionIdString))
-                  )
-                  .withEdgeTo(
-                    EdgeTypes.InputToOutput,
-                    Raw[NodeTypes.TransactionOutput](
-                      s"""SELECT expand(outE('TransactionToOutput')[index = ?].outV())
-                         |  FROM Transaction
-                         |  WHERE transactionId = ?
-                         |""".stripMargin,
-                      Array(input.boxId.transactionOutputIndex, stringifyId(input.boxId.transactionId))
+                    .foreachEntry(inputV.setProperty)
+                  inputV.save()
+                  val transactionInputV = graph
+                    .getVertices("Transaction", Array("transactionId"), Array(transactionIdString))
+                    .iterator()
+                    .next()
+                  val e = transactionInputV.addEdge(s"class:${EdgeSchemas.transactionToInputEdgeSchema}", inputV)
+                  EdgeSchemas.transactionToInputEdgeSchema
+                    .encode(
+                      EdgeTypes.TransactionToInput(index.toShort)
                     )
-                  )
-                  .run()
+                    .foreachEntry(e.setProperty)
+                  import scala.jdk.CollectionConverters._
+                  val spentTransactionInput = graph
+                    .getVertices("Transaction", Array("transactionId"), Array(stringifyId(input.boxId.transactionId)))
+                    .iterator()
+                    .next()
+                    .getEdges(Direction.OUT)
+                    .iterator()
+                    .asScala
+                    .find(e => e.getProperty[Short]("index") === input.boxId.transactionOutputIndex)
+                    .get
+                    .getVertex(Direction.IN)
+                  val e2 = inputV.addEdge(s"class:${EdgeSchemas.inputToOutputEdgeSchema}", spentTransactionInput)
+                  EdgeSchemas.inputToOutputEdgeSchema.encode(EdgeTypes.InputToOutput).foreachEntry(e2.setProperty)
+                }
               )
               _ <- transaction.outputs.traverseWithIndexM((output, outputIndex) =>
                 Logger[F].info(show"Creating transaction output id=$transactionIdString index=$outputIndex") >>
@@ -257,14 +277,17 @@ object OrientDbChainReplicator {
           ).map(_.height).value
 
         private def getGraphHeader(id: String): F[Option[NodeTypes.Header]] =
-          OptionT(
-            graph.getNode(
-              NodesByClass[NodeTypes.Header](Where.PropEquals("blockId", id))
-            )
-          ).value
+          graph.getNode(
+            NodesByClass[NodeTypes.Header](Where.PropEquals("blockId", id))
+          )
+
+        private def getGraphTransaction(id: String): F[Option[NodeTypes.Transaction]] =
+          graph.getNode(
+            NodesByClass[NodeTypes.Transaction](Where.PropEquals("transactionId", id))
+          )
 
         private def stringifyId(id: TypedIdentifier) =
-          id.immutableBytes.toBase58
+          id.allBytes.toBase58
       }
     }
   }
