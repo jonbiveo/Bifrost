@@ -70,7 +70,7 @@ object CredentialTestJing extends App {
 
   val heightProp = Propositions.Contextual.HeightLock(3)
   val adminsProp = admin1Prop.and(admin2Prop)
-  val votersThresholdProp = List(voter1Prop, voter2Prop, voter3Prop, heightProp).threshold(2)
+  val votersThresholdProp = List[Proposition](voter1Prop, voter2Prop, voter3Prop, heightProp).threshold(2)
   val combinedProp = votersThresholdProp or adminsProp
 
   val recipientAddress: SpendingAddress = KeyInitializer[SecretKeys.Curve25519].random().vk.spendingAddress

@@ -39,4 +39,5 @@ package object typeclasses {
       with NonEmpty.Instances
       with TransactionOps.Instances
       with IdentityOps
+      with NumberOps
 }

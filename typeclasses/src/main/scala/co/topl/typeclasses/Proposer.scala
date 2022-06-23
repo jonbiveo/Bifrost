@@ -29,7 +29,7 @@ object Proposer {
       def or(other: Proposition): Propositions.Compositional.Or = Propositions.Compositional.Or(p, other)
     }
 
-    implicit class IterableOps(props: Iterable[Proposition]) {
+    implicit class ProposerIterablePropositionOps(props: Iterable[Proposition]) {
 
       def threshold(k: Int): Propositions.Compositional.Threshold =
         Propositions.Compositional.Threshold(k, ListSet.empty ++ props)

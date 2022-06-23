@@ -24,15 +24,15 @@ object Credentialer {
 
   trait Implicits {
 
-    implicit class IterableOps(creds: Iterable[Credential]) {
+    implicit class CredentialerIterableCredentialOps(creds: Iterable[Credential]) {
 
-      def threshold(proposition: Propositions.Compositional.Threshold): Credential.Compositional.Threshold =
+      def asThresholdCredential(proposition: Propositions.Compositional.Threshold): Credential.Compositional.Threshold =
         Credential.Compositional.Threshold(proposition, creds)
 
-      def and(proposition: Propositions.Compositional.And): Credential.Compositional.And =
+      def asAndCredential(proposition: Propositions.Compositional.And): Credential.Compositional.And =
         Credential.Compositional.And(proposition, creds)
 
-      def or(proposition: Propositions.Compositional.Or): Credential.Compositional.Or =
+      def asOrCredential(proposition: Propositions.Compositional.Or): Credential.Compositional.Or =
         Credential.Compositional.Or(proposition, creds)
     }
   }

@@ -318,16 +318,16 @@ trait ModelsJsonCodecs {
     _ => Json.Null
 
   implicit val polyBoxValueEncoder: Encoder[Box.Values.Poly] =
-    t => Json.obj("value" -> t.quantity.asJson)
+    t => Json.obj("quantity" -> t.quantity.asJson)
 
   implicit val polyBoxValueDecoder: Decoder[Box.Values.Poly] =
-    hcursor => hcursor.downField("value").as[Int128].map(Box.Values.Poly)
+    hcursor => hcursor.downField("quantity").as[Int128].map(Box.Values.Poly)
 
   implicit val arbitBoxValueEncoder: Encoder[Box.Values.Arbit] =
-    t => Json.obj("value" -> t.quantity.asJson)
+    t => Json.obj("quantity" -> t.quantity.asJson)
 
   implicit val arbitBoxValueDecoder: Decoder[Box.Values.Arbit] =
-    hcursor => hcursor.downField("value").as[Int128].map(Box.Values.Arbit)
+    hcursor => hcursor.downField("quantity").as[Int128].map(Box.Values.Arbit)
 
   implicit val assetCodeEncoder: Encoder[Box.Values.Asset.Code] =
     t =>

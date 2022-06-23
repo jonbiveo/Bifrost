@@ -12,6 +12,9 @@ trait TetraImmutableCodecs {
   implicit val ratioStableCodec: ImmutableCodec[Ratio] =
     ImmutableCodec.fromScodecCodec
 
+  implicit val typedEvidenceImmutableCodec: ImmutableCodec[TypedEvidence] =
+    ImmutableCodec.fromScodecCodec
+
   implicit val stakingAddressBaseImmutableCodec: ImmutableCodec[StakingAddresses.Operator] =
     ImmutableCodec.fromScodecCodec
 

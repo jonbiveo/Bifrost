@@ -3,8 +3,9 @@ package co.topl.credential
 import cats.MonadError
 import cats.effect.kernel.Sync
 import cats.implicits._
-import co.topl.codecs._
-import co.topl.codecs.binary.typeclasses.Persistable
+import co.topl.codecs.bytes.typeclasses.Persistable
+import co.topl.codecs.bytes.typeclasses.implicits._
+import co.topl.codecs.bytes.tetra.instances._
 import co.topl.crypto.signing.Password
 import co.topl.models._
 import co.topl.models.utility.HasLength.instances.bytesLength
@@ -46,7 +47,7 @@ object CredentialIO {
       def save[F[_]](
         password:                  Password
       )(implicit containsEvidence: ContainsEvidence[T], codec: Persistable[T], credentialIO: CredentialIO[F]): F[Unit] =
-        credentialIO.write(t.typedEvidence, Bytes(t.persistedBytes), password)
+        credentialIO.write(t.typedEvidence, t.persistedBytes, password)
     }
   }
 }
@@ -74,7 +75,7 @@ case class DiskCredentialIO[F[_]: Sync](basePath: Path) extends CredentialIO[F] 
 
   def unlock(evidence: TypedEvidence, password: Password): F[Option[(Bytes, KeyFile.Metadata)]] =
     Sync[F].blocking {
-      val keyFilePath = Paths.get(basePath.toString, s"${evidence.allBytes.toBase58}.json")
+      val keyFilePath = Paths.get(basePath.toString, s"${evidence.immutableBytes.toBase58}.json")
       if (Files.exists(keyFilePath) && Files.isRegularFile(keyFilePath))
         Some(Files.readString(keyFilePath, StandardCharsets.UTF_8))
           .flatMap(io.circe.parser.parse(_).flatMap(_.as[KeyFile]).toOption)
