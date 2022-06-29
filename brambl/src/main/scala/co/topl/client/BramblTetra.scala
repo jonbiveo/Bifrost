@@ -48,7 +48,7 @@ object BramblTetra extends IOApp.Simple {
                       for {
                         _ <- Logger[F](logger).info(show"Broadcasting transaction id=${transaction.id.asTypedBytes}")
                         _ <- client.broadcastTransaction(transaction)
-                        _ <- Async[F].sleep(10000.milli)
+                        _ <- Async[F].sleep(20000.milli)
                       } yield ()
                     }
                 )
@@ -64,15 +64,29 @@ object BramblTetra extends IOApp.Simple {
         inputs = Chain(
           Transaction.Input(
             boxId = boxId,
-            proposition = Propositions.Contextual.HeightLock(0),
+            proposition = Propositions.Contextual.HeightLock(1L),
             proof = Proofs.False,
-            value = Box.Values.Poly(Sized.maxUnsafe(BigInt(10_000L)))
+            value = Box.Values.Poly(Sized.maxUnsafe(BigInt(10000L)))
           )
         ),
-        outputs = Chain.empty,
+        outputs = Chain(
+          Transaction.Output(
+            address,
+            Box.Values.Poly(Sized.maxUnsafe(BigInt(10000L))),
+            minting = false
+          )
+        ),
         chronology = Transaction.Chronology(System.currentTimeMillis(), 0L, Long.MaxValue),
         data = none
       ).some.map(transaction => Box.Id(transaction.id, 0) -> transaction)
+    )
+
+  private val address =
+    FullAddress(
+      NetworkPrefix(1),
+      Propositions.Contextual.HeightLock(1L).spendingAddress,
+      StakingAddresses.Operator(VerificationKeys.Ed25519(Sized.strictUnsafe(Bytes.fill(32)(0: Byte)))),
+      Proofs.Knowledge.Ed25519(Sized.strictUnsafe(Bytes.fill(64)(0: Byte)))
     )
 
   private val genesisTransaction =
@@ -86,7 +100,7 @@ object BramblTetra extends IOApp.Simple {
             StakingAddresses.Operator(VerificationKeys.Ed25519(Sized.strictUnsafe(Bytes.fill(32)(0: Byte)))),
             Proofs.Knowledge.Ed25519(Sized.strictUnsafe(Bytes.fill(64)(0: Byte)))
           ),
-          Box.Values.Poly(Sized.maxUnsafe(BigInt(10_000L))),
+          Box.Values.Poly(Sized.maxUnsafe(BigInt(10000L))),
           minting = true
         )
       ),
