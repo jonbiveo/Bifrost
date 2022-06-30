@@ -63,6 +63,9 @@ trait TetraImmutableCodecs {
   implicit val kesProductVKStableCodec: ImmutableCodec[VerificationKeys.KesProduct] =
     ImmutableCodec.fromScodecCodec
 
+  implicit val propositionImmutableCodec: ImmutableCodec[Proposition] =
+    ImmutableCodec.fromScodecCodec
+
   implicit val propositionsPermanentlyLockedImmutableCodec: ImmutableCodec[Propositions.PermanentlyLocked.type] =
     ImmutableCodec.fromScodecCodec
 

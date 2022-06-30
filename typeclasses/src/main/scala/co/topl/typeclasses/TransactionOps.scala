@@ -12,6 +12,15 @@ object TransactionOps {
 
     implicit class TransactionSupport(transaction: Transaction) {
 
+      /**
+       * Uses the given function `f` to overwrite the proof associated with
+       * each input of the transaction
+       */
+      def prove(f: (Proposition, Proof) => Proof): Transaction =
+        transaction.copy(
+          inputs = transaction.inputs.map(input => input.copy(proof = f(input.proposition, input.proof)))
+        )
+
       def unproven: Transaction.Unproven =
         Transaction
           .Unproven(
