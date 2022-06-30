@@ -107,11 +107,15 @@ object Blockchain {
         )
       mintedBlockStream <- mint.fold(Source.never[BlockV2].pure[F])(_.blocks)
       rpcInterpreter <- ToplRpcServer.make(
+        headerStore,
+        bodyStore,
         transactionStore,
         mempool,
         transactionSyntaxValidation,
         transactionSemanticValidation,
-        localChain
+        localChain,
+        localBlockAdoptionsSource.pure[F],
+        blockHeights
       )
       rpcServer = ToplGrpc.Server.serve(rpcHost, rpcPort, rpcInterpreter)
       blockStreamCompletionFuture =

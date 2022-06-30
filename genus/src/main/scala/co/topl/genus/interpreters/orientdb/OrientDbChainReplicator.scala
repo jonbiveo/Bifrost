@@ -107,7 +107,7 @@ object OrientDbChainReplicator {
                 .toRight(new NoSuchElementException(s"Body id=${id.show}"))
                 .rethrowT
                 .flatMap(body =>
-                  body.parTraverse(transactionId =>
+                  body.toList.parTraverse(transactionId =>
                     OptionT(client.fetchTransaction(transactionId))
                       .toRight(new NoSuchElementException(s"Transaction id=${transactionId.show}"))
                       .rethrowT

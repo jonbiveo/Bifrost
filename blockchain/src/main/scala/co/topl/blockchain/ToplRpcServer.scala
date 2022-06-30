@@ -1,23 +1,24 @@
 package co.topl.blockchain
 
-import cats.{Monad, Show}
 import cats.data.EitherT
+import cats.effect.{Async, Sync}
 import cats.implicits._
-import cats.effect.Async
-import co.topl.codecs.bytes.typeclasses.implicits._
-import co.topl.codecs.bytes.tetra.instances._
+import cats.{Monad, Show}
 import co.topl.algebras.{Store, ToplRpc}
-import co.topl.catsakka.FToFuture
+import co.topl.catsakka.{FToFuture, SourceMatNotUsed}
+import co.topl.codecs.bytes.tetra.instances._
+import co.topl.codecs.bytes.typeclasses.implicits._
 import co.topl.consensus.algebras.LocalChainAlgebra
+import co.topl.eventtree.EventSourcedState
 import co.topl.ledger.algebras.{
   MempoolAlgebra,
   TransactionSemanticValidationAlgebra,
   TransactionSyntaxValidationAlgebra
 }
 import co.topl.ledger.models._
-import co.topl.models.{Transaction, TypedIdentifier}
-import org.typelevel.log4cats.Logger
+import co.topl.models.{BlockBodyV2, BlockHeaderV2, Transaction, TypedIdentifier}
 import co.topl.typeclasses.implicits._
+import org.typelevel.log4cats.Logger
 
 object ToplRpcServer {
 
@@ -41,14 +42,18 @@ object ToplRpcServer {
    * Interpreter which serves Topl RPC data using local blockchain interpreters
    */
   def make[F[_]: Async: Logger: FToFuture](
-    transactionStore:    Store[F, TypedIdentifier, Transaction],
-    mempool:             MempoolAlgebra[F],
-    syntacticValidation: TransactionSyntaxValidationAlgebra[F],
-    semanticValidation:  TransactionSemanticValidationAlgebra[F],
-    localChain:          LocalChainAlgebra[F]
-  ): F[ToplRpc[F]] =
+    headerStore:          Store[F, TypedIdentifier, BlockHeaderV2],
+    bodyStore:            Store[F, TypedIdentifier, BlockBodyV2],
+    transactionStore:     Store[F, TypedIdentifier, Transaction],
+    mempool:              MempoolAlgebra[F],
+    syntacticValidation:  TransactionSyntaxValidationAlgebra[F],
+    semanticValidation:   TransactionSemanticValidationAlgebra[F],
+    localChain:           LocalChainAlgebra[F],
+    locallyAdoptedBlocks: F[SourceMatNotUsed[TypedIdentifier]],
+    blockHeights:         EventSourcedState[F, Long => F[Option[TypedIdentifier]]]
+  ): F[ToplRpc[F, SourceMatNotUsed]] =
     Async[F].delay {
-      new ToplRpc[F] {
+      new ToplRpc[F, SourceMatNotUsed] {
 
         def broadcastTransaction(transaction: Transaction): F[Unit] =
           transactionStore
@@ -95,6 +100,24 @@ object ToplRpcServer {
               new IllegalArgumentException(show"Semantically invalid transaction id=${transaction.id.asTypedBytes}")
             )
             .rethrowT
+
+        def blockAdoptions(): F[SourceMatNotUsed[TypedIdentifier]] =
+          Sync[F].defer(locallyAdoptedBlocks)
+
+        def fetchHeader(id: TypedIdentifier): F[Option[BlockHeaderV2]] =
+          headerStore.get(id)
+
+        def fetchBody(id: TypedIdentifier): F[Option[BlockBodyV2]] =
+          bodyStore.get(id)
+
+        def fetchTransaction(id: TypedIdentifier): F[Option[Transaction]] =
+          transactionStore.get(id)
+
+        def fetchBlockIdAtHeight(height: Long): F[Option[TypedIdentifier]] =
+          localChain.head
+            .map(_.slotId.blockId)
+            .flatMap(blockHeights.useStateAt(_)(_.apply(height)))
+
       }
     }
 

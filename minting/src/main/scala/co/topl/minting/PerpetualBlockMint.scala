@@ -41,7 +41,7 @@ object PerpetualBlockMint {
               Source
                 .future(
                   implicitly[F ~> Future]
-                    .apply(clock.globalSlot.map(_.max(0L)).flatMap(s => clock.delayedUntilSlot(s).as(s)))
+                    .apply(clock.globalSlot.map(_.max(1L)).flatMap(s => clock.delayedUntilSlot(s).as(s)))
                 )
                 .flatMapConcat(initialSlot =>
                   Source

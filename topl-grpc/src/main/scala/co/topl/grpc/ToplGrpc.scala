@@ -3,6 +3,7 @@ package co.topl.grpc
 import akka.NotUsed
 import akka.actor.ClassicActorSystemProvider
 import akka.grpc.GrpcClientSettings
+import akka.grpc.scaladsl.ServiceHandler
 import akka.http.scaladsl.Http
 import akka.stream.scaladsl.Source
 import cats.MonadThrow
@@ -20,6 +21,7 @@ import co.topl.models.utility.{Lengths, Sized}
 import com.google.protobuf.ByteString
 import scodec.bits.ByteVector
 
+import scala.collection.immutable.ListSet
 import scala.concurrent.Future
 import scala.language.implicitConversions
 
@@ -98,7 +100,9 @@ object ToplGrpc {
                   )
                 )
               )
-              .map(res => res.body.map(body => body.transactionIds.map(t => TypedBytes(t)).toList))
+              .map(res =>
+                res.body.map(body => ListSet.empty[TypedIdentifier] ++ body.transactionIds.map(t => TypedBytes(t)))
+              )
 
           def fetchTransaction(id: TypedIdentifier): F[Option[Transaction]] =
             Async[F]
@@ -220,7 +224,12 @@ object ToplGrpc {
           Async[F].delay(
             Http()
               .newServerAt(host, port)
-              .bind(services.ToplGrpcHandler(new GrpcServerImpl[F](interpreter)))
+              .bind(
+                ServiceHandler.concatOrNotFound(
+                  services.ToplGrpcHandler.partial(new GrpcServerImpl[F](interpreter))
+                  // Other gRPC Service handlers here
+                )
+              )
           )
         )
       )(binding => Async[F].fromFuture(Async[F].delay(binding.unbind())).void)
@@ -281,7 +290,7 @@ object ToplGrpc {
       def fetchBlockBody(in: services.FetchBlockBodyReq): Future[services.FetchBlockBodyRes] =
         implicitly[FToFuture[F]].apply(
           OptionT(interpreter.fetchBody(TypedBytes(in.blockId)))
-            .map(body => services.BlockBody(body.map(_.allBytes)))
+            .map(body => services.BlockBody(body.toList.map(_.allBytes)))
             .value
             .map(services.FetchBlockBodyRes(_))
         )
