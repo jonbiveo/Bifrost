@@ -43,7 +43,7 @@ object GenerateAndSaveKeyAndPrintPropositionRef extends IOApp.Simple with Utils 
     } yield ()
 }
 
-object CreatePartiallyProvenTransaction extends IOApp.Simple with Utils {
+object CreatePartiallyProvenTransactionRef extends IOApp.Simple with Utils {
 
   def run: IO[Unit] =
     for {
@@ -102,7 +102,7 @@ object CreatePartiallyProvenTransaction extends IOApp.Simple with Utils {
     } yield ()
 }
 
-object CompleteAndBroadcastTransaction extends IOApp.Simple with Utils {
+object CompleteAndBroadcastTransactionRef extends IOApp.Simple with Utils {
 
   val partiallyProvenTransactionBytesBase58 =
     "2WR4TP94riARai68q59kio92XhzGfAn3NNJzbr5kMHmnUsjKEaJwqjSCE89WsXk8trWAeFAVkaeAPrHzoCJMSRzj3K99gh8BUaDeT59ViUdB91QRuZKLrFNWCWL4SffuSDUzixMBksX87crniv4XJcVmXBR6jCmUWGvNwU3aQxZsXbacTaMfgCKGmB9qXLH45iF6562mqV6n2Jcm36eo2yjLCWjbJgs99CmUEqcXhQPHUhsjW37KPMcRZwYAzzs3WKX4qq2KDqdphnqF9tsnokRFJwk1sDkUnCQXLsMNcoL6ksxgvjjZZpbGCH5pRrNbgBmsVkFgE1dbLHLfb4QJLbwrcEuEL3feA8L9NiPCZZnoMJFHvRkccvFukN4gW1EfYbAWw642stsGu7V5ciBuBUfySLNXH1WpGS2vBQSqxXWZvT9oiw9EBzQC5LyiVV2ujmiQJdRG66NuJSJStHJgjXRFXSt8HbxRyi39ktyZDLx8nSERz9EJHPbPubDdtt3VZtv419aNM2D3mzeQDZKmdv5Bio2YYVMko7LFPJhw1jvB1gEtf2mcoByvzJj7s9Ys2KbtnAsB7G1eP2L5djPDVHzmBApSWGegeANeMmPuY3zLF9NUKZnr7oWAiQN7SehWr542vkLYoSoaPpWLFUjPyat7kS27VSWth6c2uJEDYPSpHchNpGwdCzp678PD43Nv7kBAQ5A1ecEmZdcTQTijnLxxibVmZdHE3bNaeSPdYhumoDdPUkcwitom8CFtC4LmM7M86dwLGqNm14XZnsjFRvD4No27R6RrYXuAbwtMaD4cT8syBmEUm7acBzctqThwiVwfC8HX6azzFXbkjoHyLdgk7vYw"
