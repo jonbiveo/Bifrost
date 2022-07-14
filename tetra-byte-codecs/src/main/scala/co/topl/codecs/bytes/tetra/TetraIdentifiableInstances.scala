@@ -24,9 +24,12 @@ trait TetraIdentifiableInstances {
       (IdentifierTypes.Block.HeaderV2, new Blake2b256().hash(bytes).data)
     }
 
+  implicit val unprovenTransactionIdentifiable: Identifiable[Transaction.Unproven] =
+    transaction => (IdentifierTypes.Transaction, new Blake2b256().hash(transaction.immutableBytes).data)
+
   implicit val transactionIdentifiable: Identifiable[Transaction] =
-    transaction => {
-      val bytes =
+    transaction =>
+      unprovenTransactionIdentifiable.idOf(
         Transaction
           .Unproven(
             transaction.inputs.map(i => Transaction.Unproven.Input(i.boxId, i.proposition, i.value)),
@@ -34,10 +37,8 @@ trait TetraIdentifiableInstances {
             transaction.chronology,
             transaction.data
           )
-          .immutableBytes
-      val hash = new Blake2b256().hash(bytes)
-      (IdentifierTypes.Transaction, hash.data)
-    }
+      )
+
 }
 
 object TetraIdentifiableInstances extends TetraIdentifiableInstances

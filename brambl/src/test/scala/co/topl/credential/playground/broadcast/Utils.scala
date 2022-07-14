@@ -5,19 +5,7 @@ import cats.data.OptionT
 import cats.effect.IO
 import co.topl.codecs.bytes.typeclasses.Persistable
 import co.topl.crypto.signing.Ed25519
-import co.topl.models.{
-  Bytes,
-  FullAddress,
-  NetworkPrefix,
-  Proposition,
-  SecretKeys,
-  SpendingAddress,
-  StakingAddress,
-  StakingAddresses,
-  Transaction,
-  TransactionData,
-  TypedEvidence
-}
+import co.topl.models.{Bytes, FullAddress, NetworkPrefix, Proposition, SecretKeys, SpendingAddress, StakingAddress, StakingAddresses, Transaction, TransactionData, TypedEvidence, TypedIdentifier}
 import co.topl.codecs.bytes.tetra.instances._
 import co.topl.codecs.bytes.typeclasses.implicits._
 import co.topl.credential.{CredentialIO, DiskCredentialIO}
@@ -45,6 +33,9 @@ trait Utils {
 
   protected def decodeProposition(propositionBase58: String): Proposition =
     Bytes.fromValidBase58(propositionBase58).decodeImmutable[Proposition].getOrElse(???)
+
+  protected def decodeId(propositionBase58: String): TypedIdentifier =
+    Bytes.fromValidBase58(propositionBase58).decodeImmutable[TypedIdentifier].getOrElse(???)
 
   protected def loadKey[SK: Persistable](evidenceBase58: String, password: String): F[SK] = for {
     typedEvidence <- Bytes
