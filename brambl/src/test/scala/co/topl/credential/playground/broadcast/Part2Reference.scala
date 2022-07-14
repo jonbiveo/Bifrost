@@ -6,9 +6,10 @@ import cats.implicits._
 import co.topl.codecs.bytes.tetra.instances._
 import co.topl.codecs.bytes.typeclasses.implicits._
 import co.topl.credential.Credential
+import co.topl.crypto.generation.KeyInitializer
+import co.topl.crypto.generation.KeyInitializer.Instances.ed25519Initializer
 import co.topl.models.ModelGenerators._
 import co.topl.models._
-import co.topl.typeclasses.KeyInitializer
 import co.topl.typeclasses.implicits._
 
 import scala.collection.immutable.ListSet
@@ -92,7 +93,7 @@ object CreatePartiallyProvenTransactionRef extends IOApp.Simple with Utils {
       seanCredential = Credential.Knowledge.Ed25519(seanSK, unprovenTransaction)
       credential = Credential.Compositional.Threshold(thresholdProposition, List(seanCredential))
       provenTransaction = unprovenTransaction.prove { case `thresholdProposition` =>
-        credential.prove(Proofs.False)
+        credential.prove(Proofs.Undefined)
       }
       _ = println(s"Your transaction is $provenTransaction")
       _ = println(s"Your proof is ${provenTransaction.inputs.headOption.get.proof}")

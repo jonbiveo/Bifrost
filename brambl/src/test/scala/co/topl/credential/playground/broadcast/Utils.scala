@@ -21,10 +21,11 @@ import co.topl.models.{
 import co.topl.codecs.bytes.tetra.instances._
 import co.topl.codecs.bytes.typeclasses.implicits._
 import co.topl.credential.{CredentialIO, DiskCredentialIO}
+import co.topl.crypto.generation.KeyInitializer
+import co.topl.crypto.generation.KeyInitializer.Instances.ed25519Initializer
 import co.topl.models.utility.HasLength.instances.latin1DataLength
 import co.topl.models.utility.Sized
 import co.topl.models.utility.StringDataTypes.Latin1Data
-import co.topl.typeclasses.KeyInitializer
 import co.topl.typeclasses.implicits._
 
 import java.nio.file.{Files, Path, Paths}

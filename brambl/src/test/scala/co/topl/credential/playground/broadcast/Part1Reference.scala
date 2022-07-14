@@ -6,10 +6,11 @@ import cats.implicits._
 import co.topl.codecs.bytes.tetra.instances._
 import co.topl.codecs.bytes.typeclasses.implicits._
 import co.topl.credential.{Credential, DiskCredentialIO}
+import co.topl.crypto.generation.KeyInitializer
+import co.topl.crypto.generation.KeyInitializer.Instances.ed25519Initializer
 import co.topl.crypto.signing.Ed25519
 import co.topl.models.ModelGenerators._
 import co.topl.models._
-import co.topl.typeclasses.KeyInitializer
 import co.topl.typeclasses.implicits._
 
 import java.nio.file.{Files, Path, Paths}
@@ -90,7 +91,7 @@ object SendPolysToPartyBRef extends IOApp.Simple {
       credential = Credential.Knowledge.Ed25519(partyASK, unprovenTransaction)
 
       provenTransaction = unprovenTransaction.prove { case `partyAProposition` =>
-        credential.prove(Proofs.False)
+        credential.prove(Proofs.Undefined)
       }
 
       _ <- broadcastTx(provenTransaction)
