@@ -36,9 +36,8 @@ object ContainsEvidence {
     final val PropositionsCompositionalNot: Byte = 15
     final val PropositionsContextualHeightLock: Byte = 16
     final val PropositionsContextualRequiredBoxState: Byte = 17
-    final val PropositionsScriptJS: Byte = 18
 
-    final val Ratio: Byte = 19
+    final val Ratio: Byte = 18
   }
 
   trait VerificationKeyInstances {
@@ -104,11 +103,9 @@ object ContainsEvidence {
     implicit val heightLockContainsEvidence: ContainsEvidence[Propositions.Contextual.HeightLock] =
       fromImmutableCodec(TypePrefixes.PropositionsContextualHeightLock)
 
-    implicit val requiredInputBoxStateContainsEvidence: ContainsEvidence[Propositions.Contextual.RequiredBoxState] =
+    implicit val requiredInputBoxStateContainsEvidence
+      : ContainsEvidence[Propositions.Contextual.RequiredTransactionIO] =
       fromImmutableCodec(TypePrefixes.PropositionsContextualRequiredBoxState)
-
-    implicit val jsScriptPropositionContainsEvidence: ContainsEvidence[Propositions.Script.JS] =
-      fromImmutableCodec(TypePrefixes.PropositionsScriptJS)
 
     implicit lazy val propositionContainsEvidence: ContainsEvidence[Proposition] = {
       case Propositions.PermanentlyLocked =>
@@ -117,14 +114,13 @@ object ContainsEvidence {
       case t: Propositions.Knowledge.Ed25519    => ed25519KnowledgePropositionContainsEvidence.typedEvidenceOf(t)
       case t: Propositions.Knowledge.ExtendedEd25519 =>
         extendedEd25519KnowledgePropositionContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Compositional.And           => andContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Compositional.Or            => orContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Compositional.Not           => notContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Compositional.Threshold     => thresholdContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Contextual.HeightLock       => heightLockContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Script.JS                   => jsScriptPropositionContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Knowledge.HashLock          => commitRevealContainsEvidence.typedEvidenceOf(t)
-      case t: Propositions.Contextual.RequiredBoxState => requiredInputBoxStateContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Compositional.And                => andContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Compositional.Or                 => orContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Compositional.Not                => notContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Compositional.Threshold          => thresholdContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Contextual.HeightLock            => heightLockContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Knowledge.HashLock               => commitRevealContainsEvidence.typedEvidenceOf(t)
+      case t: Propositions.Contextual.RequiredTransactionIO => requiredInputBoxStateContainsEvidence.typedEvidenceOf(t)
     }
   }
 

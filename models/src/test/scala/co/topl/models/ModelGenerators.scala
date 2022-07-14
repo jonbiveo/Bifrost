@@ -442,26 +442,19 @@ trait ModelGenerators {
     Arbitrary(Gen.posNum[Long].map(Propositions.Contextual.HeightLock))
 
   implicit val arbitraryBoxLocation: Arbitrary[BoxLocation] =
-    Arbitrary(Gen.oneOf(BoxLocations.Input, BoxLocations.Output))
+    Arbitrary(Gen.posNum[Short].flatMap(index => Gen.oneOf(BoxLocations.Input(index), BoxLocations.Output(index))))
 
-  implicit val arbitraryPropositionsContextualRequiredBoxState: Arbitrary[Propositions.Contextual.RequiredBoxState] =
+  implicit val arbitraryPropositionsContextualRequiredBoxState
+    : Arbitrary[Propositions.Contextual.RequiredTransactionIO] =
     Arbitrary(
       for {
-        location <- arbitraryBoxLocation.arbitrary
         boxes <- Gen.nonEmptyListOf(
           Gen.zip(
-            Gen.chooseNum[Int](0, 5),
-            arbitraryBox.arbitrary
+            arbitraryBox.arbitrary,
+            arbitraryBoxLocation.arbitrary
           )
         )
-      } yield Propositions.Contextual.RequiredBoxState(location, boxes)
-    )
-
-  implicit val arbitraryPropositionsScriptJs: Arbitrary[Propositions.Script.JS] =
-    Arbitrary(
-      Gen.asciiPrintableStr
-        .map(Propositions.Script.JS.JSScript(_))
-        .map(Propositions.Script.JS(_))
+      } yield Propositions.Contextual.RequiredTransactionIO(boxes)
     )
 
   implicit val arbitraryTypedIdentifier: Arbitrary[TypedIdentifier] =
@@ -485,13 +478,12 @@ trait ModelGenerators {
         implicitly[Arbitrary[Propositions.Compositional.Or]].arbitrary,
         implicitly[Arbitrary[Propositions.Compositional.Not]].arbitrary,
         implicitly[Arbitrary[Propositions.Contextual.HeightLock]].arbitrary,
-        implicitly[Arbitrary[Propositions.Contextual.RequiredBoxState]].arbitrary,
-        implicitly[Arbitrary[Propositions.Script.JS]].arbitrary
+        implicitly[Arbitrary[Propositions.Contextual.RequiredTransactionIO]].arbitrary
       )
     )
 
-  implicit val arbitraryProofsFalse: Arbitrary[Proofs.False.type] =
-    Arbitrary(Gen.const(Proofs.False))
+  implicit val arbitraryProofsFalse: Arbitrary[Proofs.Undefined.type] =
+    Arbitrary(Gen.const(Proofs.Undefined))
 
   implicit val arbitraryProofsKnowledgeCurve25519: Arbitrary[Proofs.Knowledge.Curve25519] =
     Arbitrary(curve25519ProofGen)
@@ -511,9 +503,8 @@ trait ModelGenerators {
   implicit val arbitraryProofsKnowledgeHashLock: Arbitrary[Proofs.Knowledge.HashLock] =
     Arbitrary(
       for {
-        salt  <- genSizedStrictBytes[Lengths.`32`.type]()
-        value <- byteGen
-      } yield Proofs.Knowledge.HashLock(salt, value)
+        value <- arbitraryBytes.arbitrary
+      } yield Proofs.Knowledge.HashLock(value)
     )
 
   implicit val arbitraryProofsCompositionalThreshold: Arbitrary[Proofs.Compositional.Threshold] =
@@ -550,9 +541,9 @@ trait ModelGenerators {
       Gen.const(Proofs.Contextual.HeightLock())
     )
 
-  implicit val arbitraryProofsContextualRequiredBoxState: Arbitrary[Proofs.Contextual.RequiredBoxState] =
+  implicit val arbitraryProofsContextualRequiredBoxState: Arbitrary[Proofs.Contextual.RequiredTransactionIO] =
     Arbitrary(
-      Gen.const(Proofs.Contextual.RequiredBoxState())
+      Gen.const(Proofs.Contextual.RequiredTransactionIO())
     )
 
   implicit val arbitraryProofsScriptJs: Arbitrary[Proofs.Script.JS] =
@@ -660,6 +651,30 @@ trait ModelGenerators {
         chronology <- arbitraryTransactionChronology.arbitrary
         data = None
       } yield Transaction(inputs, outputs, chronology, data)
+    )
+
+  implicit val arbitrarySlotId: Arbitrary[SlotId] =
+    Arbitrary(
+      for {
+        slot    <- Gen.posNum[Long]
+        blockId <- arbitraryTypedIdentifier.arbitrary
+      } yield SlotId(slot, blockId)
+    )
+
+  implicit val arbitraryRho: Arbitrary[Rho] =
+    Arbitrary(
+      genSizedStrictBytes[Lengths.`64`.type]().map(Rho(_))
+    )
+
+  implicit val arbitrarySlotData: Arbitrary[SlotData] =
+    Arbitrary(
+      for {
+        slotId       <- arbitrarySlotId.arbitrary
+        parentSlotId <- arbitrarySlotId.arbitrary
+        rho          <- arbitraryRho.arbitrary
+        eta          <- etaGen
+        height       <- Gen.posNum[Long]
+      } yield SlotData(slotId, parentSlotId, rho, eta, height)
     )
 
   implicit val arbitraryHeader: Arbitrary[BlockHeaderV2] =

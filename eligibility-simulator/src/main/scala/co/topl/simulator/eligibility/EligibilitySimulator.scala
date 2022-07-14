@@ -19,7 +19,7 @@ import co.topl.consensus.LeaderElectionValidation.VrfConfig
 import co.topl.consensus._
 import co.topl.consensus.algebras.{EtaCalculationAlgebra, LeaderElectionValidationAlgebra}
 import co.topl.crypto.hash.{Blake2b256, Blake2b512}
-import co.topl.crypto.mnemonic.Entropy
+import co.topl.crypto.generation.mnemonic.Entropy
 import co.topl.crypto.signing.{Ed25519, Ed25519VRF, KesProduct}
 import co.topl.interpreters._
 import co.topl.minting._
@@ -66,7 +66,7 @@ object EligibilitySimulator extends IOApp.Simple {
   // Create stubbed/sample/demo data
 
   private val (_, poolVK) =
-    new Ed25519().createKeyPair(Entropy.fromUuid(UUID.randomUUID()), None)
+    new Ed25519().deriveKeyPairFromEntropy(Entropy.fromUuid(UUID.randomUUID()), None)
 
   private val stakers = List.fill(NumberOfStakers) {
 
@@ -75,7 +75,7 @@ object EligibilitySimulator extends IOApp.Simple {
     implicit val kesProduct: KesProduct = new KesProduct
 
     val (stakerVrfKey, _) =
-      ed25519Vrf.createKeyPair(Entropy.fromUuid(UUID.randomUUID()), None)
+      ed25519Vrf.deriveKeyPairFromEntropy(Entropy.fromUuid(UUID.randomUUID()), None)
 
     val (kesKey, _) =
       kesProduct.createKeyPair(seed = Bytes(Random.nextBytes(32)), height = KesKeyHeight, 0)
@@ -215,13 +215,14 @@ object EligibilitySimulator extends IOApp.Simple {
       ed25519VRFResource <- ActorPoolUnsafeResource.Eval.make[F, Ed25519VRF](Ed25519VRF.precomputed(), _ => ())
       kesProductResource <- ActorPoolUnsafeResource.Eval.make[F, KesProduct](new KesProduct, _ => ())
       ed25519Resource    <- ActorPoolUnsafeResource.Eval.make[F, Ed25519](new Ed25519, _ => ())
+      slotDataStore      <- RefStore.Eval.make[F, TypedIdentifier, SlotData]()
       blockHeaderStore   <- RefStore.Eval.make[F, TypedIdentifier, BlockHeaderV2]()
       blockBodyStore     <- RefStore.Eval.make[F, TypedIdentifier, BlockBodyV2]()
       blockStore = createBlockStore(blockHeaderStore, blockBodyStore)
-      _             <- blockStore.put(genesis.headerV2.id, genesis)
-      slotDataCache <- SlotDataCache.Eval.make(blockHeaderStore, ed25519VRFResource)
+      _ <- blockStore.put(genesis.headerV2.id, genesis)
+      _ <- slotDataStore.put(genesis.headerV2.id, genesis.headerV2.slotData(Ed25519VRF.precomputed()))
       etaCalculation <- EtaCalculation.Eval.make(
-        slotDataCache,
+        slotDataStore.getOrRaise,
         clock,
         genesis.headerV2.eligibilityCertificate.eta,
         blake2b256Resource,
@@ -246,7 +247,8 @@ object EligibilitySimulator extends IOApp.Simple {
       cachedHeaderValidation <- BlockHeaderValidation.WithCache.make[F](underlyingHeaderValidation, blockHeaderStore)
       localChain <- LocalChain.Eval.make(
         genesis.headerV2.slotData(Ed25519VRF.precomputed()),
-        ChainSelection.orderT[F](slotDataCache, blake2b512Resource, ChainSelectionKLookback, ChainSelectionSWindow)
+        ChainSelection
+          .orderT[F](slotDataStore.getOrRaise, blake2b512Resource, ChainSelectionKLookback, ChainSelectionSWindow)
       )
       m <- mints(
         etaCalculation,
