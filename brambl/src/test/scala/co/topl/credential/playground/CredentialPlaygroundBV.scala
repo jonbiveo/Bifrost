@@ -2,43 +2,24 @@ package co.topl.credential.playground
 
 import cats.data.Chain
 import co.topl.credential.Credential
-import co.topl.crypto.signing.{Ed25519, ExtendedEd25519}
+import co.topl.crypto.signing.{Curve25519, Ed25519, ExtendedEd25519}
 import co.topl.codecs.bytes.typeclasses.implicits._
 import co.topl.codecs.bytes.tetra.instances._
+import co.topl.crypto.generation.KeyInitializer.Instances.ed25519Initializer
 import co.topl.models.utility.Sized
 import co.topl.models._
 import co.topl.models.utility.HasLength.instances._
-import co.topl.scripting.GraalVMScripting
-import co.topl.scripting.GraalVMScripting.GraalVMValuable
-import co.topl.scripting.GraalVMScripting.instances._
 import co.topl.typeclasses.implicits._
-import co.topl.typeclasses.{KeyInitializer, VerificationContext}
-import io.circe.Json
-import org.graalvm.polyglot.Value
 import ModelGenerators._
-import cats.effect.unsafe.implicits.global
+import co.topl.crypto.generation.KeyInitializer
 
 object CredentialPlaygroundBV extends App {
   type F[A] = cats.effect.IO[A]
 
+  implicit val curve25519: Curve25519 = new Curve25519
   implicit val ed25519: Ed25519 = new Ed25519
-  implicit val extendedEd25519: ExtendedEd25519 = ExtendedEd25519.precomputed()
+  implicit val extendedEd25519: ExtendedEd25519 = new ExtendedEd25519
 
-  implicit val jsExecutor: Propositions.Script.JS.JSScript => F[(Json, Json) => F[Boolean]] =
-    s =>
-      GraalVMScripting
-        .jsExecutor[F, Boolean](s.value)
-        .map(f =>
-          Function.untupled(
-            f.compose[(Json, Json)] { t =>
-              Seq(
-                GraalVMValuable[Json].toGraalValue(t._1),
-                GraalVMValuable[Json].toGraalValue(t._2),
-                Value.asValue(new VerificationUtils)
-              )
-            }
-          )
-        )
   implicit val networkPrefix: NetworkPrefix = NetworkPrefix(1: Byte)
 
   // Exercise: Construct complex propositions and attempt to prove them using Credentials
@@ -127,20 +108,6 @@ object CredentialPlaygroundBV extends App {
     boardProp,
     List(Credential.Knowledge.Ed25519(playerA, randomTx))
   )
-
-  implicit val context: VerificationContext[F] = new VerificationContext[F] {
-
-    override val currentTransaction: Transaction =
-      randomTx.prove(_ => boardCred.proof)
-
-    override val currentHeight: Slot = 10
-    def inputBoxes: List[Box] = List()
-    def currentSlot: Slot = 1
-  }
-
-  val validProof = boardProp.isSatisfiedBy(boardCred.proof).unsafeRunSync()
-
-  println(validProof)
 
   // Example:
   //  val party1SK: SecretKeys.Ed25519 = KeyInitializer[SecretKeys.Ed25519].random()
